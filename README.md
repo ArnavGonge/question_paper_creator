@@ -9,7 +9,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .streamlit/secrets.example.toml .streamlit/secrets.toml
-PYTHONPATH=src .venv/bin/python -m streamlit run app.py
+.venv/bin/python -m streamlit run app.py
 ```
 
 Set real values in `.streamlit/secrets.toml` before using AI generation.
@@ -17,8 +17,8 @@ Set real values in `.streamlit/secrets.toml` before using AI generation.
 ## Tests
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m pytest -v
-PYTHONPATH=src .venv/bin/ruff check src tests app.py
+.venv/bin/python -m pytest -v
+.venv/bin/ruff check src tests app.py
 ```
 
 ## V1 Limits

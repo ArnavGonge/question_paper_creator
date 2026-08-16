@@ -5,7 +5,8 @@
 1. Push the repository to GitHub.
 2. Create a Streamlit Community Cloud app from the repository.
 3. Set the main file path to `app.py`.
-4. Add secrets:
+4. Streamlit Cloud installs `requirements.txt`, including the local `src/qpc` package via `-e .`.
+5. Add secrets:
 
 ```toml
 APP_PASSWORD = "client-password"
@@ -13,15 +14,15 @@ OPENAI_API_KEY = "real-openai-key"
 OPENAI_MODEL = "gpt-4.1-mini"
 ```
 
-5. Deploy the app.
-6. Share the Streamlit app URL and password with the client.
+6. Deploy the app.
+7. Share the Streamlit app URL and password with the client.
 
 ## Render Or Railway
 
 Use this route when stronger privacy or operational control is needed. Configure the same environment variables as secrets and run:
 
 ```bash
-PYTHONPATH=src streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
 ```
 
 ## Operational Notes
