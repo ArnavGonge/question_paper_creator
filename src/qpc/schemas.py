@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date
 from enum import StrEnum
 from typing import Any
 
@@ -60,7 +60,8 @@ class PaperMetadata(BaseModel):
     @field_validator("date")
     @classmethod
     def validate_date(cls, value: str) -> str:
-        datetime.strptime(value, "%d.%m.%Y")
+        day, month, year = (int(part) for part in value.split("."))
+        date(year, month, day)
         return value
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import streamlit as st
@@ -10,10 +10,10 @@ from qpc.demo_data import default_blueprint
 from qpc.docx_exporter import render_docx
 from qpc.error_reporting import (
     AppConfigurationError,
-    ErrorReport,
     report_operation_error,
 )
 from qpc.pdf_extractor import extract_pdf_bytes
+from qpc.presentation import apply_app_theme, render_error_report, render_step_heading
 from qpc.question_generator import generate_questions_with_ai
 from qpc.schemas import (
     GeneratedPaper,
@@ -434,7 +434,8 @@ def metric_text(value: int, label: str) -> str:
 
 
 def parse_metadata_date(value: str) -> date:
-    return datetime.strptime(value, "%d.%m.%Y").date()
+    day, month, year = (int(part) for part in value.split("."))
+    return date(year, month, day)
 
 
 def format_metadata_date(value: date) -> str:
@@ -446,10 +447,6 @@ def extraction_success_message(document_count: int, page_count: int) -> str:
         f"Text extracted from {metric_text(document_count, 'PDF')}, "
         f"{metric_text(page_count, 'page')}."
     )
-
-
-def show_error_report(report: ErrorReport) -> None:
-    st.error(f"{report.user_message} Reference: {report.reference_id}")
 
 
 def render_wizard_progress() -> None:
@@ -498,7 +495,7 @@ def navigation_controls() -> None:
 
 
 def upload_step() -> None:
-    st.subheader("Add source PDFs")
+    render_step_heading("Upload PDFs")
     st.caption(f"PDF only. Recommended: {MAX_UPLOAD_PDFS} or fewer files.")
     files = st.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
     if files:
@@ -534,7 +531,7 @@ def upload_step() -> None:
         if errors:
             st.error("Some files could not be read.")
     for error in st.session_state.upload_errors:
-        show_error_report(error)
+        render_error_report(error)
     if st.session_state.documents:
         doc_count, page_count = document_upload_summary(st.session_state.documents)
         st.success(extraction_success_message(doc_count, page_count))
@@ -544,7 +541,7 @@ def upload_step() -> None:
 
 
 def topics_step() -> None:
-    st.subheader("Topics")
+    render_step_heading("Topics")
     if not st.session_state.documents:
         st.info("Upload and extract PDFs first.")
         return
@@ -572,7 +569,7 @@ def topics_step() -> None:
             st.session_state.paper = None
             st.session_state.paper_inputs = None
         except Exception as exc:  # noqa: BLE001
-            show_error_report(report_operation_error("topic_extraction", exc))
+            render_error_report(report_operation_error("topic_extraction", exc))
 
     if not st.session_state.topics:
         st.caption("The checklist will appear here after topics are found.")
@@ -619,7 +616,7 @@ def topics_step() -> None:
 
 
 def paper_details_step() -> None:
-    st.subheader("Header details")
+    render_step_heading("Paper Details")
     blueprint: PaperBlueprint = st.session_state.blueprint
     previous_blueprint = blueprint.model_dump(mode="json")
     metadata = blueprint.metadata
@@ -647,7 +644,7 @@ def paper_details_step() -> None:
 
 
 def question_sections_step() -> None:
-    st.subheader("Build paper sections")
+    render_step_heading("Question Sections")
     blueprint: PaperBlueprint = st.session_state.blueprint
     previous_blueprint = blueprint.model_dump(mode="json")
 
@@ -734,7 +731,7 @@ def question_sections_step() -> None:
 
 
 def generation_step() -> None:
-    st.subheader("Generate the paper")
+    render_step_heading("Generate and Review")
     selected_topics = [topic for topic in st.session_state.topics if topic.selected]
     source_col, topic_col, section_col = st.columns(3)
     source_col.metric("PDFs", len(st.session_state.documents))
@@ -787,7 +784,7 @@ def generation_step() -> None:
                 )
                 st.success("Question paper generated.")
         except Exception as exc:  # noqa: BLE001
-            show_error_report(report_operation_error("paper_generation", exc))
+            render_error_report(report_operation_error("paper_generation", exc))
 
     paper: GeneratedPaper | None = st.session_state.paper
     if paper is None:
@@ -843,7 +840,7 @@ def generation_step() -> None:
                         section = paper.sections[section_index]
                         st.success(f"{section.label} regenerated.")
                 except Exception as exc:  # noqa: BLE001
-                    show_error_report(
+                    render_error_report(
                         report_operation_error(
                             "section_generation",
                             exc,
@@ -912,7 +909,7 @@ def generation_step() -> None:
 
 
 def download_step() -> None:
-    st.subheader("Download the Word file")
+    render_step_heading("Download Word Document")
     if st.session_state.paper is None:
         st.info("Generate a valid paper before downloading.")
         return
@@ -925,7 +922,7 @@ def download_step() -> None:
     try:
         data = render_docx(st.session_state.blueprint, st.session_state.paper)
     except Exception as exc:  # noqa: BLE001
-        show_error_report(report_operation_error("document_export", exc))
+        render_error_report(report_operation_error("document_export", exc))
         return
     st.download_button(
         "Download Word document",
@@ -937,6 +934,7 @@ def download_step() -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Question Paper Creator", layout="wide")
+    apply_app_theme()
     ensure_state()
     if not password_gate():
         return

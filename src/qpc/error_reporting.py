@@ -5,7 +5,6 @@ import traceback
 from dataclasses import dataclass
 from uuid import uuid4
 
-
 LOGGER = logging.getLogger("qpc")
 
 
