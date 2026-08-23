@@ -8,6 +8,11 @@ import streamlit as st
 
 from qpc.demo_data import default_blueprint
 from qpc.docx_exporter import render_docx
+from qpc.error_reporting import (
+    AppConfigurationError,
+    ErrorReport,
+    report_operation_error,
+)
 from qpc.pdf_extractor import extract_pdf_bytes
 from qpc.question_generator import generate_questions_with_ai
 from qpc.schemas import (
@@ -344,7 +349,7 @@ def run_generation(
     model: str,
 ) -> GeneratedPaper:
     if not api_key:
-        raise ValueError("Missing OPENAI_API_KEY. Add it to Streamlit secrets or the server environment.")
+        raise AppConfigurationError("openai")
     return generate_questions_with_ai(
         documents,
         topics,
@@ -443,6 +448,10 @@ def extraction_success_message(document_count: int, page_count: int) -> str:
     )
 
 
+def show_error_report(report: ErrorReport) -> None:
+    st.error(f"{report.user_message} Reference: {report.reference_id}")
+
+
 def render_wizard_progress() -> None:
     current = clamp_step(st.session_state.wizard_step)
     st.session_state.wizard_step = current
@@ -505,7 +514,13 @@ def upload_step() -> None:
                 try:
                     documents.append(extract_pdf_bytes(file.name, file.getvalue()))
                 except Exception as exc:  # noqa: BLE001
-                    errors.append(f"{file.name}: {exc}")
+                    errors.append(
+                        report_operation_error(
+                            "pdf_extraction",
+                            exc,
+                            context={"filename": file.name},
+                        )
+                    )
         st.session_state.upload_errors = errors
         st.session_state.documents = documents_after_extraction(
             st.session_state.documents,
@@ -519,7 +534,7 @@ def upload_step() -> None:
         if errors:
             st.error("Some files could not be read.")
     for error in st.session_state.upload_errors:
-        st.error(error)
+        show_error_report(error)
     if st.session_state.documents:
         doc_count, page_count = document_upload_summary(st.session_state.documents)
         st.success(extraction_success_message(doc_count, page_count))
@@ -546,9 +561,7 @@ def topics_step() -> None:
     if should_extract or refresh_requested:
         try:
             if not api_key:
-                raise ValueError(
-                    "Missing OPENAI_API_KEY. Add it to Streamlit secrets or the server environment."
-                )
+                raise AppConfigurationError("openai")
             with st.spinner("Finding topics from the uploaded PDFs..."):
                 topic_set = extract_topics_with_ai(
                     st.session_state.documents,
@@ -559,7 +572,7 @@ def topics_step() -> None:
             st.session_state.paper = None
             st.session_state.paper_inputs = None
         except Exception as exc:  # noqa: BLE001
-            st.error(f"Topic extraction failed: {exc}")
+            show_error_report(report_operation_error("topic_extraction", exc))
 
     if not st.session_state.topics:
         st.caption("The checklist will appear here after topics are found.")
@@ -774,7 +787,7 @@ def generation_step() -> None:
                 )
                 st.success("Question paper generated.")
         except Exception as exc:  # noqa: BLE001
-            st.error(f"Paper generation failed: {exc}")
+            show_error_report(report_operation_error("paper_generation", exc))
 
     paper: GeneratedPaper | None = st.session_state.paper
     if paper is None:
@@ -830,7 +843,13 @@ def generation_step() -> None:
                         section = paper.sections[section_index]
                         st.success(f"{section.label} regenerated.")
                 except Exception as exc:  # noqa: BLE001
-                    st.error(f"{section.label} regeneration failed: {exc}")
+                    show_error_report(
+                        report_operation_error(
+                            "section_generation",
+                            exc,
+                            context={"section": section.label},
+                        )
+                    )
 
             if section.passage:
                 section.passage = st.text_area(
@@ -903,7 +922,11 @@ def download_step() -> None:
             st.error(issue.message)
         st.info("Fix the paper issues above before downloading.")
         return
-    data = render_docx(st.session_state.blueprint, st.session_state.paper)
+    try:
+        data = render_docx(st.session_state.blueprint, st.session_state.paper)
+    except Exception as exc:  # noqa: BLE001
+        show_error_report(report_operation_error("document_export", exc))
+        return
     st.download_button(
         "Download Word document",
         data=data,
