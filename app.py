@@ -13,7 +13,12 @@ from qpc.error_reporting import (
     report_operation_error,
 )
 from qpc.pdf_extractor import extract_pdf_bytes
-from qpc.presentation import apply_app_theme, render_error_report, render_step_heading
+from qpc.presentation import (
+    apply_app_theme,
+    error_report_text,
+    render_error_report,
+    render_step_heading,
+)
 from qpc.question_generator import generate_questions_with_ai
 from qpc.schemas import (
     GeneratedPaper,
@@ -106,6 +111,13 @@ def selected_topic_count(topics: list[Topic]) -> int:
 
 def should_auto_extract_topics(documents: list, topics: list) -> bool:
     return bool(documents) and not topics
+
+
+def topics_by_document(topics: list[Topic]) -> dict[str, list[Topic]]:
+    grouped: dict[str, list[Topic]] = {}
+    for topic in topics:
+        grouped.setdefault(topic.document_filename, []).append(topic)
+    return grouped
 
 
 def step_ready(
@@ -391,6 +403,8 @@ def ensure_state() -> None:
         st.session_state.paper_inputs = None
     if "upload_errors" not in st.session_state:
         st.session_state.upload_errors = []
+    if "upload_result_message" not in st.session_state:
+        st.session_state.upload_result_message = ""
 
 
 def clear_paper_if_blueprint_changed(previous_blueprint: dict) -> None:
@@ -449,6 +463,17 @@ def extraction_success_message(document_count: int, page_count: int) -> str:
     )
 
 
+def upload_result_summary(success_count: int, failure_count: int) -> str:
+    if success_count == 0 and failure_count:
+        return "No new PDFs were extracted; your previous sources are still available."
+    if failure_count == 0:
+        return f"{metric_text(success_count, 'PDF')} ready."
+    return (
+        f"{metric_text(success_count, 'PDF')} ready; "
+        f"{metric_text(failure_count, 'PDF')} needs attention."
+    )
+
+
 def render_wizard_progress() -> None:
     current = clamp_step(st.session_state.wizard_step)
     st.session_state.wizard_step = current
@@ -499,6 +524,7 @@ def upload_step() -> None:
     st.caption(f"PDF only. Recommended: {MAX_UPLOAD_PDFS} or fewer files.")
     files = st.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
     if files:
+        st.caption(f"{metric_text(len(files), 'file')} selected")
         limit_message = uploaded_pdf_limit_message(len(files))
         if limit_message:
             st.warning(limit_message)
@@ -512,13 +538,19 @@ def upload_step() -> None:
                     documents.append(extract_pdf_bytes(file.name, file.getvalue()))
                 except Exception as exc:  # noqa: BLE001
                     errors.append(
-                        report_operation_error(
-                            "pdf_extraction",
-                            exc,
-                            context={"filename": file.name},
+                        (
+                            file.name,
+                            report_operation_error(
+                                "pdf_extraction",
+                                exc,
+                                context={"filename": file.name},
+                            ),
                         )
                     )
         st.session_state.upload_errors = errors
+        st.session_state.upload_result_message = upload_result_summary(
+            len(documents), len(errors)
+        )
         st.session_state.documents = documents_after_extraction(
             st.session_state.documents,
             documents,
@@ -528,14 +560,17 @@ def upload_step() -> None:
             st.session_state.topics = []
             st.session_state.paper = None
             st.session_state.paper_inputs = None
-        if errors:
-            st.error("Some files could not be read.")
-    for error in st.session_state.upload_errors:
-        render_error_report(error)
+    if st.session_state.upload_result_message:
+        if st.session_state.upload_errors:
+            st.warning(st.session_state.upload_result_message)
+        else:
+            st.success(st.session_state.upload_result_message)
+    for filename, error in st.session_state.upload_errors:
+        st.error(f"{filename}: {error_report_text(error)}")
     if st.session_state.documents:
         doc_count, page_count = document_upload_summary(st.session_state.documents)
-        st.success(extraction_success_message(doc_count, page_count))
-        with st.expander("Extraction details"):
+        st.caption(extraction_success_message(doc_count, page_count))
+        with st.expander("Available sources"):
             for document in st.session_state.documents:
                 st.write(f"{document.filename}: {metric_text(len(document.pages), 'page')}")
 
@@ -581,20 +616,24 @@ def topics_step() -> None:
     blueprint_snapshot = st.session_state.blueprint.model_dump(mode="json")
     updated_topics: list[Topic] = []
 
-    st.caption(
-        f"Selected {selected_topic_count(st.session_state.topics)} of "
-        f"{len(st.session_state.topics)} topics"
+    st.metric(
+        "Selected topics",
+        f"{selected_topic_count(st.session_state.topics)} of {len(st.session_state.topics)}",
     )
-    columns = st.columns(2)
-    for index, topic in enumerate(st.session_state.topics):
-        with columns[index % 2]:
-            selected = st.checkbox(
-                topic.name,
-                value=topic.selected,
-                key=f"topic_{topic.id}",
-                help=topic.summary,
-            )
-            updated_topics.append(topic.model_copy(update={"selected": selected}))
+    for filename, document_topics in topics_by_document(
+        st.session_state.topics
+    ).items():
+        st.markdown(f"#### {filename}")
+        columns = st.columns(2)
+        for index, topic in enumerate(document_topics):
+            with columns[index % 2]:
+                selected = st.checkbox(
+                    topic.name,
+                    value=topic.selected,
+                    key=f"topic_{topic.document_filename}_{topic.id}",
+                    help=topic.summary,
+                )
+                updated_topics.append(topic.model_copy(update={"selected": selected}))
     st.session_state.topics = updated_topics
     new_selected_topics = snapshot_selected_topics(st.session_state.topics)
     if st.session_state.paper is not None and paper_is_stale(
@@ -619,14 +658,27 @@ def paper_details_step() -> None:
     render_step_heading("Paper Details")
     blueprint: PaperBlueprint = st.session_state.blueprint
     previous_blueprint = blueprint.model_dump(mode="json")
-    metadata = blueprint.metadata
+    metadata = blueprint.metadata.model_copy(deep=True)
 
-    grade_col, subject_col, exam_col = st.columns(3)
+    st.markdown("#### School")
+    school_name_col, affiliation_col = st.columns(2)
+    metadata.school_name = school_name_col.text_input(
+        "School name", metadata.school_name
+    )
+    metadata.affiliation = affiliation_col.text_input(
+        "Affiliation", metadata.affiliation
+    )
+    metadata.school_address = st.text_input(
+        "School address", metadata.school_address
+    )
+
+    st.markdown("#### Assessment")
+    grade_col, subject_col = st.columns(2)
     metadata.grade = grade_col.text_input("Grade", metadata.grade)
     metadata.subject = subject_col.text_input("Subject", metadata.subject)
-    metadata.exam_name = exam_col.text_input("Exam name", metadata.exam_name)
+    metadata.exam_name = st.text_input("Exam name", metadata.exam_name)
 
-    date_col, duration_col = st.columns(2)
+    date_col, duration_col, total_col = st.columns(3)
     selected_date = date_col.date_input(
         "Date",
         value=parse_metadata_date(metadata.date),
@@ -634,13 +686,14 @@ def paper_details_step() -> None:
     )
     metadata.date = format_metadata_date(selected_date)
     metadata.duration = duration_col.text_input("Time", metadata.duration)
+    total_col.metric("Calculated marks", blueprint.total_marks())
+    total_col.caption("Change this total in Question Sections.")
 
     st.session_state.blueprint = PaperBlueprint(
         metadata=metadata,
         sections=blueprint.sections,
     )
     clear_paper_if_blueprint_changed(previous_blueprint)
-    st.metric("Calculated marks", st.session_state.blueprint.total_marks())
 
 
 def question_sections_step() -> None:

@@ -21,6 +21,8 @@ from app import (
     snapshot_documents,
     snapshot_selected_topics,
     step_ready,
+    topics_by_document,
+    upload_result_summary,
     uploaded_pdf_limit_message,
     validate_export_ready_paper,
     wizard_primary_action,
@@ -96,6 +98,16 @@ def test_extraction_success_message_is_single_concise_result():
     assert extraction_success_message(1, 1) == "Text extracted from 1 PDF, 1 page."
 
 
+def test_upload_result_summary_handles_partial_success():
+    assert upload_result_summary(2, 1) == "2 PDFs ready; 1 PDF needs attention."
+
+
+def test_upload_result_summary_handles_complete_failure():
+    assert upload_result_summary(0, 2) == (
+        "No new PDFs were extracted; your previous sources are still available."
+    )
+
+
 def test_metadata_date_round_trips_between_picker_and_header_format():
     parsed = parse_metadata_date("17.07.2026")
 
@@ -138,6 +150,34 @@ def test_topics_auto_extract_only_after_documents_before_topics_exist():
     assert should_auto_extract_topics(documents=[object()], topics=[]) is True
     assert should_auto_extract_topics(documents=[], topics=[]) is False
     assert should_auto_extract_topics(documents=[object()], topics=[object()]) is False
+
+
+def test_topics_are_grouped_by_source_document_in_input_order():
+    topics = [
+        Topic(
+            id="weather",
+            document_filename="climate.pdf",
+            name="Weather",
+            summary="Daily atmospheric conditions",
+        ),
+        Topic(
+            id="rivers",
+            document_filename="geography.pdf",
+            name="Rivers",
+            summary="River systems",
+        ),
+        Topic(
+            id="rainfall",
+            document_filename="climate.pdf",
+            name="Rainfall",
+            summary="Forms of precipitation",
+        ),
+    ]
+
+    grouped = topics_by_document(topics)
+
+    assert list(grouped) == ["climate.pdf", "geography.pdf"]
+    assert [topic.id for topic in grouped["climate.pdf"]] == ["weather", "rainfall"]
 
 
 def test_step_ready_guides_incomplete_flow():
