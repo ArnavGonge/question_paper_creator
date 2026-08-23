@@ -108,12 +108,12 @@ def test_metadata_date_parser_rejects_unparseable_existing_value():
         parse_metadata_date("not-a-date")
 
 
-def test_documents_after_extraction_replaces_stale_documents_with_empty_result():
+def test_documents_after_extraction_keeps_working_documents_after_total_failure():
     previous = [
         SourceDocument(filename="old.pdf", pages=[SourcePage(page_number=1, text="Old")])
     ]
 
-    assert documents_after_extraction(previous, []) == []
+    assert documents_after_extraction(previous, []) == previous
 
 
 def test_wizard_sidebar_state_distinguishes_available_from_completed():

@@ -24,6 +24,7 @@ from qpc.validators import (
     expected_generated_question_count,
     validate_generated_paper,
 )
+from qpc.workflow import documents_after_extraction
 
 
 def load_secret(name: str, default: str = "") -> str:
@@ -82,10 +83,6 @@ def uploaded_pdf_limit_message(file_count: int) -> str | None:
 
 def document_upload_summary(documents: list) -> tuple[int, int]:
     return len(documents), sum(len(document.pages) for document in documents)
-
-
-def documents_after_extraction(previous_documents: list, extracted_documents: list) -> list:
-    return extracted_documents
 
 
 def wizard_sidebar_state(step_index: int, current_step: int, ready: bool) -> str:
