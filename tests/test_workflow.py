@@ -50,6 +50,22 @@ def test_move_section_returns_reordered_copies_without_relabelling():
     assert moved[0] is not sections[1]
 
 
+@pytest.mark.parametrize(
+    ("index", "offset", "message"),
+    [
+        (0, -1, "section cannot move beyond the list"),
+        (2, 1, "section cannot move beyond the list"),
+        (1, 2, "invalid section move"),
+        (4, -1, "invalid section move"),
+    ],
+)
+def test_move_section_rejects_invalid_boundaries(index, offset, message):
+    sections = [section("Section A"), section("Section B"), section("Section C")]
+
+    with pytest.raises(ValueError, match=message):
+        move_section(sections, index, offset)
+
+
 def test_delete_section_rejects_deleting_the_last_section():
     with pytest.raises(ValueError, match="at least one section"):
         delete_section(default_sections(), 0)
@@ -61,6 +77,11 @@ def test_delete_section_removes_only_the_requested_section():
     remaining = delete_section(sections, 1)
 
     assert [item.label for item in remaining] == ["Section A", "Section C"]
+
+
+def test_delete_section_rejects_an_invalid_index():
+    with pytest.raises(ValueError, match="invalid section index"):
+        delete_section([section("Section A"), section("Section B")], 4)
 
 
 def test_new_section_uses_first_available_label_after_a_gap():

@@ -8,6 +8,7 @@ from app import (
     build_generation_inputs_snapshot,
     build_generation_issue_diagnostics,
     clamp_step,
+    clear_section_widget_state,
     document_upload_summary,
     documents_after_extraction,
     extraction_success_message,
@@ -544,3 +545,20 @@ def test_build_generation_inputs_snapshot_uses_selected_topics_and_blueprint_jso
 
     assert [topic["id"] for topic in snapshot["topics"]] == ["selected-topic"]
     assert snapshot["blueprint"] == blueprint.model_dump(mode="json")
+
+
+def test_clear_section_widget_state_removes_only_section_editor_keys():
+    state = {
+        "label_0": "Section A",
+        "heading_0": "MCQ",
+        "type_0": QuestionType.MCQ,
+        "instruction_0": "Choose one",
+        "gen_0": 4,
+        "ans_0": 4,
+        "marks_0": 1,
+        "topic_weather": True,
+    }
+
+    clear_section_widget_state(state)
+
+    assert state == {"topic_weather": True}

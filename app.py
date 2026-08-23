@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import MutableMapping
 from datetime import date
 from typing import Any
 
@@ -14,10 +15,12 @@ from qpc.error_reporting import (
 )
 from qpc.pdf_extractor import extract_pdf_bytes
 from qpc.presentation import (
+    QUESTION_TYPE_LABELS,
     apply_app_theme,
     error_report_text,
     render_error_report,
     render_step_heading,
+    section_header,
 )
 from qpc.question_generator import generate_questions_with_ai
 from qpc.schemas import (
@@ -34,7 +37,12 @@ from qpc.validators import (
     expected_generated_question_count,
     validate_generated_paper,
 )
-from qpc.workflow import documents_after_extraction
+from qpc.workflow import (
+    append_default_section,
+    delete_section,
+    documents_after_extraction,
+    move_section,
+)
 
 
 def load_secret(name: str, default: str = "") -> str:
@@ -57,6 +65,15 @@ PRIMARY_ACTIONS = (
     "Build sections",
     "Generate paper",
     "Download Word document",
+)
+SECTION_WIDGET_PREFIXES = (
+    "label_",
+    "heading_",
+    "type_",
+    "instruction_",
+    "gen_",
+    "ans_",
+    "marks_",
 )
 
 
@@ -118,6 +135,12 @@ def topics_by_document(topics: list[Topic]) -> dict[str, list[Topic]]:
     for topic in topics:
         grouped.setdefault(topic.document_filename, []).append(topic)
     return grouped
+
+
+def clear_section_widget_state(state: MutableMapping[str, Any]) -> None:
+    for key in list(state):
+        if key.startswith(SECTION_WIDGET_PREFIXES):
+            del state[key]
 
 
 def step_ready(
@@ -405,6 +428,8 @@ def ensure_state() -> None:
         st.session_state.upload_errors = []
     if "upload_result_message" not in st.session_state:
         st.session_state.upload_result_message = ""
+    if "pending_section_delete" not in st.session_state:
+        st.session_state.pending_section_delete = None
 
 
 def clear_paper_if_blueprint_changed(previous_blueprint: dict) -> None:
@@ -428,6 +453,47 @@ def clear_paper_if_blueprint_changed(previous_blueprint: dict) -> None:
     ):
         st.session_state.paper = None
         st.session_state.paper_inputs = None
+
+
+def cancel_section_delete() -> None:
+    st.session_state.pending_section_delete = None
+
+
+@st.dialog(
+    "Delete section?",
+    icon=":material/delete:",
+    on_dismiss=cancel_section_delete,
+)
+def confirm_section_delete() -> None:
+    index = st.session_state.pending_section_delete
+    sections = st.session_state.blueprint.sections
+    if index is None or index not in range(len(sections)):
+        cancel_section_delete()
+        st.rerun()
+
+    section = sections[index]
+    st.write(
+        f"Delete **{section.label}**? The paper will need to be generated again."
+    )
+    cancel_col, delete_col = st.columns(2)
+    if cancel_col.button("Cancel", use_container_width=True):
+        cancel_section_delete()
+        st.rerun()
+    if delete_col.button(
+        "Delete section",
+        type="primary",
+        icon=":material/delete:",
+        use_container_width=True,
+    ):
+        previous_blueprint = st.session_state.blueprint.model_dump(mode="json")
+        st.session_state.blueprint = PaperBlueprint(
+            metadata=st.session_state.blueprint.metadata,
+            sections=delete_section(sections, index),
+        )
+        cancel_section_delete()
+        clear_section_widget_state(st.session_state)
+        clear_paper_if_blueprint_changed(previous_blueprint)
+        st.rerun()
 
 
 def password_gate() -> bool:
@@ -701,10 +767,67 @@ def question_sections_step() -> None:
     blueprint: PaperBlueprint = st.session_state.blueprint
     previous_blueprint = blueprint.model_dump(mode="json")
 
+    total_col, add_col = st.columns([3, 1])
+    total_col.metric("Paper total", f"{blueprint.total_marks()} marks")
+    if add_col.button(
+        "Add section",
+        icon=":material/add:",
+        type="primary",
+        use_container_width=True,
+    ):
+        st.session_state.blueprint = PaperBlueprint(
+            metadata=blueprint.metadata,
+            sections=append_default_section(blueprint.sections),
+        )
+        clear_section_widget_state(st.session_state)
+        clear_paper_if_blueprint_changed(previous_blueprint)
+        st.rerun()
+
     sections: list[SectionBlueprint] = []
     for index, section in enumerate(blueprint.sections):
         expanded = index == 0
-        with st.expander(f"{section.label}: {section.heading}", expanded=expanded):
+        with st.expander(section_header(section), expanded=expanded):
+            move_up_col, move_down_col, delete_col = st.columns(3)
+            if move_up_col.button(
+                "Move up",
+                key=f"move_up_{index}",
+                icon=":material/arrow_upward:",
+                disabled=index == 0,
+                help="Move this section earlier in the paper",
+                use_container_width=True,
+            ):
+                st.session_state.blueprint = PaperBlueprint(
+                    metadata=blueprint.metadata,
+                    sections=move_section(blueprint.sections, index, -1),
+                )
+                clear_section_widget_state(st.session_state)
+                clear_paper_if_blueprint_changed(previous_blueprint)
+                st.rerun()
+            if move_down_col.button(
+                "Move down",
+                key=f"move_down_{index}",
+                icon=":material/arrow_downward:",
+                disabled=index == len(blueprint.sections) - 1,
+                help="Move this section later in the paper",
+                use_container_width=True,
+            ):
+                st.session_state.blueprint = PaperBlueprint(
+                    metadata=blueprint.metadata,
+                    sections=move_section(blueprint.sections, index, 1),
+                )
+                clear_section_widget_state(st.session_state)
+                clear_paper_if_blueprint_changed(previous_blueprint)
+                st.rerun()
+            if delete_col.button(
+                "Delete",
+                key=f"delete_{index}",
+                icon=":material/delete:",
+                disabled=len(blueprint.sections) == 1,
+                help="Delete this section",
+                use_container_width=True,
+            ):
+                st.session_state.pending_section_delete = index
+
             label_col, heading_col = st.columns([1, 3])
             label = label_col.text_input(
                 "Section label",
@@ -722,7 +845,7 @@ def question_sections_step() -> None:
                 "Question type",
                 list(QuestionType),
                 index=list(QuestionType).index(section.question_type),
-                format_func=lambda value: value.value.replace("_", " ").title(),
+                format_func=lambda value: QUESTION_TYPE_LABELS[value],
                 key=f"type_{index}",
             )
             instruction = instruction_col.text_input(
@@ -731,7 +854,7 @@ def question_sections_step() -> None:
                 key=f"instruction_{index}",
             )
 
-            generate_col, answer_col, marks_col = st.columns(3)
+            generate_col, answer_col, marks_col, subtotal_col = st.columns(4)
             generate = generate_col.number_input(
                 "Questions to generate",
                 min_value=1,
@@ -751,6 +874,7 @@ def question_sections_step() -> None:
                 value=section.marks_per_question,
                 key=f"marks_{index}",
             )
+            subtotal_col.metric("Section total", f"{answer * marks} marks")
             sections.append(
                 SectionBlueprint(
                     label=label,
@@ -763,24 +887,13 @@ def question_sections_step() -> None:
                 )
             )
 
-    if st.button("Add section"):
-        sections.append(
-            SectionBlueprint(
-                label=f"Section {chr(65 + len(sections))}",
-                heading="Short Answer Based Questions",
-                question_type=QuestionType.SHORT,
-                questions_to_generate=3,
-                questions_to_answer=3,
-                marks_per_question=2,
-            )
-        )
-
     st.session_state.blueprint = PaperBlueprint(
         metadata=blueprint.metadata,
         sections=sections,
     )
     clear_paper_if_blueprint_changed(previous_blueprint)
-    st.caption(f"Section total: {st.session_state.blueprint.total_marks()} marks")
+    if st.session_state.pending_section_delete is not None:
+        confirm_section_delete()
 
 
 def generation_step() -> None:
