@@ -80,7 +80,6 @@ def test_build_question_prompt_includes_selected_topics_and_blueprint():
             subject="Social Science",
             exam_name="First Periodic Assessment 2026-27",
             date="17.07.2026",
-            max_marks=4,
             duration="2 Hour",
         ),
         sections=[
@@ -104,6 +103,7 @@ def test_build_question_prompt_includes_selected_topics_and_blueprint():
     assert "case_study: return exactly one question object" in prompt
     assert "sub_questions as an array of plain strings, not objects" in prompt
     assert "map_diagram: return exactly generate question objects" in prompt
+    assert "Paper total: 4 marks" in prompt
 
 
 def test_normalize_generated_paper_collapses_case_study_questions_to_subquestions():
@@ -113,7 +113,6 @@ def test_normalize_generated_paper_collapses_case_study_questions_to_subquestion
             subject="Social Science",
             exam_name="First Periodic Assessment 2026-27",
             date="17.07.2026",
-            max_marks=2,
             duration="2 Hour",
         ),
         sections=[
@@ -166,7 +165,6 @@ def test_normalize_generated_paper_limits_case_study_subquestions_to_blueprint_c
             subject="Social Science",
             exam_name="First Periodic Assessment 2026-27",
             date="17.07.2026",
-            max_marks=2,
             duration="2 Hour",
         ),
         sections=[
@@ -225,7 +223,6 @@ def test_normalize_generated_paper_fills_empty_map_diagram_section():
             subject="Social Science",
             exam_name="First Periodic Assessment 2026-27",
             date="17.07.2026",
-            max_marks=1,
             duration="2 Hour",
         ),
         sections=[

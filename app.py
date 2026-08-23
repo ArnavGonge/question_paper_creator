@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Any
 
 import streamlit as st
@@ -22,7 +22,6 @@ from qpc.topic_extractor import extract_topics_with_ai
 from qpc.validators import (
     ValidationIssue,
     expected_generated_question_count,
-    validate_blueprint,
     validate_generated_paper,
 )
 
@@ -122,8 +121,6 @@ def step_ready(
         return False, "Find topics from the PDFs first."
     if current >= 2 and selected_topic_count(topics) == 0:
         return False, "Select at least one topic first."
-    if current >= 4 and validate_blueprint(blueprint):
-        return False, "Fix the paper details and section warnings first."
     if current >= 5 and paper is None:
         return False, "Generate a valid question paper first."
     return True, ""
@@ -435,14 +432,7 @@ def metric_text(value: int, label: str) -> str:
 
 
 def parse_metadata_date(value: str) -> date:
-    try:
-        parts = value.split(".")
-        if len(parts) != 3:
-            raise ValueError
-        day, month, year = (int(part) for part in parts)
-        return date(year, month, day)
-    except ValueError:
-        return datetime.now(UTC).date()
+    return datetime.strptime(value, "%d.%m.%Y").date()
 
 
 def format_metadata_date(value: date) -> str:
@@ -629,7 +619,7 @@ def paper_details_step() -> None:
     metadata.subject = subject_col.text_input("Subject", metadata.subject)
     metadata.exam_name = exam_col.text_input("Exam name", metadata.exam_name)
 
-    date_col, duration_col, marks_col = st.columns(3)
+    date_col, duration_col = st.columns(2)
     selected_date = date_col.date_input(
         "Date",
         value=parse_metadata_date(metadata.date),
@@ -637,23 +627,13 @@ def paper_details_step() -> None:
     )
     metadata.date = format_metadata_date(selected_date)
     metadata.duration = duration_col.text_input("Time", metadata.duration)
-    metadata.max_marks = marks_col.number_input(
-        "Maximum marks",
-        min_value=1,
-        value=metadata.max_marks,
-        step=1,
-    )
 
     st.session_state.blueprint = PaperBlueprint(
         metadata=metadata,
         sections=blueprint.sections,
     )
     clear_paper_if_blueprint_changed(previous_blueprint)
-    if st.session_state.blueprint.total_marks() != metadata.max_marks:
-        st.warning(
-            f"Section total is {st.session_state.blueprint.total_marks()} marks; "
-            f"paper maximum is {metadata.max_marks}."
-        )
+    st.metric("Calculated marks", st.session_state.blueprint.total_marks())
 
 
 def question_sections_step() -> None:
@@ -740,10 +720,7 @@ def question_sections_step() -> None:
         sections=sections,
     )
     clear_paper_if_blueprint_changed(previous_blueprint)
-    issues = validate_blueprint(st.session_state.blueprint)
     st.caption(f"Section total: {st.session_state.blueprint.total_marks()} marks")
-    for issue in issues:
-        st.warning(issue.message)
 
 
 def generation_step() -> None:
@@ -759,7 +736,6 @@ def generation_step() -> None:
     disabled = (
         not st.session_state.documents
         or not selected_topics
-        or bool(validate_blueprint(st.session_state.blueprint))
     )
     if disabled:
         ready, message = step_ready(

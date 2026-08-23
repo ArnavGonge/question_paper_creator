@@ -7,7 +7,7 @@ from qpc.schemas import (
     QuestionType,
     SectionBlueprint,
 )
-from qpc.validators import validate_blueprint, validate_generated_paper
+from qpc.validators import validate_generated_paper
 
 
 def make_blueprint() -> PaperBlueprint:
@@ -17,7 +17,6 @@ def make_blueprint() -> PaperBlueprint:
             subject="Social Science",
             exam_name="First Periodic Assessment 2026-27",
             date="17.07.2026",
-            max_marks=4,
             duration="2 Hour",
         ),
         sections=[
@@ -31,16 +30,6 @@ def make_blueprint() -> PaperBlueprint:
             )
         ],
     )
-
-
-def test_validate_blueprint_detects_total_mismatch():
-    blueprint = make_blueprint()
-    blueprint.metadata.max_marks = 5
-
-    issues = validate_blueprint(blueprint)
-
-    assert [issue.code for issue in issues] == ["paper_total_mismatch"]
-
 
 def test_validate_generated_paper_accepts_valid_mcq_section():
     blueprint = make_blueprint()

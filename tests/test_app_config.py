@@ -1,4 +1,6 @@
-from datetime import UTC, date, datetime
+from datetime import date
+
+import pytest
 
 from app import (
     MAX_UPLOAD_PDFS,
@@ -101,8 +103,9 @@ def test_metadata_date_round_trips_between_picker_and_header_format():
     assert format_metadata_date(parsed) == "17.07.2026"
 
 
-def test_metadata_date_parser_falls_back_for_unparseable_existing_value():
-    assert parse_metadata_date("July 2026") == datetime.now(UTC).date()
+def test_metadata_date_parser_rejects_unparseable_existing_value():
+    with pytest.raises(ValueError):
+        parse_metadata_date("not-a-date")
 
 
 def test_documents_after_extraction_replaces_stale_documents_with_empty_result():

@@ -56,7 +56,7 @@ def _add_header(document: Document, blueprint: PaperBlueprint) -> None:
     table.cell(1, 1).text = f"Date: - {metadata.date}"
     table.cell(2, 0).text = "Roll No: - _______"
     table.cell(2, 1).text = (
-        f"M.M. {metadata.max_marks}        Time- {metadata.duration}"
+        f"M.M. {blueprint.total_marks()}        Time- {metadata.duration}"
     )
 
 

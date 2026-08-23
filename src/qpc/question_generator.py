@@ -51,6 +51,8 @@ Rules:
 Selected topics:
 {topic_lines}
 
+Paper total: {blueprint.total_marks()} marks
+
 Section blueprint:
 {section_lines}
 

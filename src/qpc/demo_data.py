@@ -7,7 +7,6 @@ def default_metadata() -> PaperMetadata:
         subject="Social Science",
         exam_name="First Periodic Assessment 2026-27",
         date="17.07.2026",
-        max_marks=4,
         duration="2 Hour",
     )
 

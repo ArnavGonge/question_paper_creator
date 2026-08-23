@@ -25,14 +25,13 @@ def _document_text(document: Document) -> str:
     return "\n".join(paragraphs + table_cells)
 
 
-def test_render_docx_contains_header_and_questions():
+def test_render_docx_uses_calculated_total_in_header():
     blueprint = PaperBlueprint(
         metadata=PaperMetadata(
             grade="VII",
             subject="Social Science",
             exam_name="First Periodic Assessment 2026-27",
             date="17.07.2026",
-            max_marks=4,
             duration="2 Hour",
         ),
         sections=[
@@ -42,7 +41,7 @@ def test_render_docx_contains_header_and_questions():
                 question_type=QuestionType.MCQ,
                 questions_to_generate=1,
                 questions_to_answer=1,
-                marks_per_question=4,
+                marks_per_question=7,
                 instruction="Choose the correct option.",
             )
         ],
@@ -74,7 +73,7 @@ def test_render_docx_contains_header_and_questions():
     assert "Grade: VII" in text
     assert "Subject: - Social Science" in text
     assert "Date: - 17.07.2026" in text
-    assert "M.M. 4        Time- 2 Hour" in text
+    assert "M.M. 7        Time- 2 Hour" in text
     assert "Section A" in text
     assert "Choose the correct option." in text
     assert "Which physical feature" in text
@@ -92,7 +91,6 @@ def test_render_docx_includes_case_study_instruction_passage_and_subquestions():
             subject="Social Science",
             exam_name="First Periodic Assessment 2026-27",
             date="17.07.2026",
-            max_marks=4,
             duration="2 Hour",
         ),
         sections=[

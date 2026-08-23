@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -51,11 +52,16 @@ class PaperMetadata(BaseModel):
     subject: str
     exam_name: str
     date: str
-    max_marks: int = Field(gt=0)
     duration: str
     school_name: str = "ZENITH PUBLIC SCHOOL"
     school_address: str = "Plot no 13 & 14, Sector 5, Airoli, Navi Mumbai 400708"
     affiliation: str = "CBSE Affiliation No.- 1131335"
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        datetime.strptime(value, "%d.%m.%Y")
+        return value
 
 
 class SectionBlueprint(BaseModel):

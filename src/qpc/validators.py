@@ -9,20 +9,6 @@ class ValidationIssue:
     message: str
     section_label: str = ""
 
-
-def validate_blueprint(blueprint: PaperBlueprint) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    total = blueprint.total_marks()
-    if total != blueprint.metadata.max_marks:
-        issues.append(
-            ValidationIssue(
-                code="paper_total_mismatch",
-                message=f"Configured sections total {total} marks, but max marks is {blueprint.metadata.max_marks}.",
-            )
-        )
-    return issues
-
-
 def validate_generated_paper(
     blueprint: PaperBlueprint, paper: GeneratedPaper
 ) -> list[ValidationIssue]:

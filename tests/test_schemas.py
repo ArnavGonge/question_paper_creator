@@ -22,7 +22,6 @@ def test_section_and_paper_marks_are_calculated():
         subject="Social Science",
         exam_name="First Periodic Assessment 2026-27",
         date="17.07.2026",
-        max_marks=30,
         duration="2 Hour",
     )
     sections = [
@@ -49,6 +48,29 @@ def test_section_and_paper_marks_are_calculated():
     assert sections[0].section_marks() == 4
     assert sections[1].section_marks() == 4
     assert blueprint.total_marks() == 8
+
+
+def test_paper_metadata_rejects_an_invalid_header_date():
+    with pytest.raises(ValidationError):
+        PaperMetadata(
+            grade="VII",
+            subject="Social Science",
+            exam_name="First Periodic Assessment 2026-27",
+            date="2026-07-17",
+            duration="2 Hours",
+        )
+
+
+def test_paper_metadata_has_no_independent_max_marks_field():
+    metadata = PaperMetadata(
+        grade="VII",
+        subject="Social Science",
+        exam_name="Assessment",
+        date="17.07.2026",
+        duration="2 Hours",
+    )
+
+    assert "max_marks" not in metadata.model_dump()
 
 
 def test_section_rejects_answer_count_greater_than_generated():
@@ -109,7 +131,6 @@ def test_paper_blueprint_rejects_empty_sections():
         subject="Social Science",
         exam_name="First Periodic Assessment 2026-27",
         date="17.07.2026",
-        max_marks=30,
         duration="2 Hour",
     )
 
