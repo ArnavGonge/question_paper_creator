@@ -143,6 +143,37 @@ def clear_section_widget_state(state: MutableMapping[str, Any]) -> None:
             del state[key]
 
 
+def generation_summary(
+    source_count: int,
+    topic_count: int,
+    blueprint: PaperBlueprint,
+) -> dict[str, str]:
+    return {
+        "Sources": f"{source_count} PDFs",
+        "Topics": f"{topic_count} selected",
+        "Sections": str(len(blueprint.sections)),
+        "Total": f"{blueprint.total_marks()} marks",
+    }
+
+
+STALE_PAPER_MESSAGES = {
+    "sources": "Your source PDFs changed. Choose topics and generate the paper again.",
+    "topics": (
+        "Your topic selection changed. Generate the paper again before downloading."
+    ),
+    "details": (
+        "Your paper details changed. Generate the paper again before downloading."
+    ),
+    "sections": (
+        "Your section setup changed. Generate the paper again before downloading."
+    ),
+}
+
+
+def stale_paper_notice(reason: str) -> str:
+    return STALE_PAPER_MESSAGES[reason]
+
+
 def step_ready(
     step: int,
     *,
@@ -407,6 +438,7 @@ def save_generated_paper(
         topics=topics,
         blueprint=blueprint,
     )
+    st.session_state.paper_stale_notice = ""
 
 
 def ensure_state() -> None:
@@ -424,6 +456,8 @@ def ensure_state() -> None:
         st.session_state.paper = None
     if "paper_inputs" not in st.session_state:
         st.session_state.paper_inputs = None
+    if "paper_stale_notice" not in st.session_state:
+        st.session_state.paper_stale_notice = ""
     if "upload_errors" not in st.session_state:
         st.session_state.upload_errors = []
     if "upload_result_message" not in st.session_state:
@@ -432,7 +466,18 @@ def ensure_state() -> None:
         st.session_state.pending_section_delete = None
 
 
-def clear_paper_if_blueprint_changed(previous_blueprint: dict) -> None:
+def invalidate_generated_paper(reason: str) -> None:
+    if st.session_state.paper is not None:
+        st.session_state.paper_stale_notice = stale_paper_notice(reason)
+    st.session_state.paper = None
+    st.session_state.paper_inputs = None
+
+
+def clear_paper_if_blueprint_changed(
+    previous_blueprint: dict,
+    *,
+    reason: str = "sections",
+) -> None:
     previous_inputs = st.session_state.paper_inputs
     documents_snapshot = snapshot_documents(st.session_state.documents)
     topics_snapshot = snapshot_selected_topics(st.session_state.topics)
@@ -451,8 +496,7 @@ def clear_paper_if_blueprint_changed(previous_blueprint: dict) -> None:
         ),
         new_blueprint=new_blueprint,
     ):
-        st.session_state.paper = None
-        st.session_state.paper_inputs = None
+        invalidate_generated_paper(reason)
 
 
 def cancel_section_delete() -> None:
@@ -492,7 +536,7 @@ def confirm_section_delete() -> None:
         )
         cancel_section_delete()
         clear_section_widget_state(st.session_state)
-        clear_paper_if_blueprint_changed(previous_blueprint)
+        clear_paper_if_blueprint_changed(previous_blueprint, reason="sections")
         st.rerun()
 
 
@@ -624,8 +668,7 @@ def upload_step() -> None:
         new_documents = snapshot_documents(st.session_state.documents)
         if previous_documents != new_documents:
             st.session_state.topics = []
-            st.session_state.paper = None
-            st.session_state.paper_inputs = None
+            invalidate_generated_paper("sources")
     if st.session_state.upload_result_message:
         if st.session_state.upload_errors:
             st.warning(st.session_state.upload_result_message)
@@ -665,10 +708,9 @@ def topics_step() -> None:
                     st.session_state.documents,
                     api_key=api_key,
                     model=model,
-                )
+            )
             st.session_state.topics = topic_set.topics
-            st.session_state.paper = None
-            st.session_state.paper_inputs = None
+            invalidate_generated_paper("topics")
         except Exception as exc:  # noqa: BLE001
             render_error_report(report_operation_error("topic_extraction", exc))
 
@@ -716,8 +758,7 @@ def topics_step() -> None:
         ),
         new_blueprint=blueprint_snapshot,
     ):
-        st.session_state.paper = None
-        st.session_state.paper_inputs = None
+        invalidate_generated_paper("topics")
 
 
 def paper_details_step() -> None:
@@ -759,7 +800,7 @@ def paper_details_step() -> None:
         metadata=metadata,
         sections=blueprint.sections,
     )
-    clear_paper_if_blueprint_changed(previous_blueprint)
+    clear_paper_if_blueprint_changed(previous_blueprint, reason="details")
 
 
 def question_sections_step() -> None:
@@ -780,7 +821,7 @@ def question_sections_step() -> None:
             sections=append_default_section(blueprint.sections),
         )
         clear_section_widget_state(st.session_state)
-        clear_paper_if_blueprint_changed(previous_blueprint)
+        clear_paper_if_blueprint_changed(previous_blueprint, reason="sections")
         st.rerun()
 
     sections: list[SectionBlueprint] = []
@@ -801,7 +842,9 @@ def question_sections_step() -> None:
                     sections=move_section(blueprint.sections, index, -1),
                 )
                 clear_section_widget_state(st.session_state)
-                clear_paper_if_blueprint_changed(previous_blueprint)
+                clear_paper_if_blueprint_changed(
+                    previous_blueprint, reason="sections"
+                )
                 st.rerun()
             if move_down_col.button(
                 "Move down",
@@ -816,7 +859,9 @@ def question_sections_step() -> None:
                     sections=move_section(blueprint.sections, index, 1),
                 )
                 clear_section_widget_state(st.session_state)
-                clear_paper_if_blueprint_changed(previous_blueprint)
+                clear_paper_if_blueprint_changed(
+                    previous_blueprint, reason="sections"
+                )
                 st.rerun()
             if delete_col.button(
                 "Delete",
@@ -891,7 +936,7 @@ def question_sections_step() -> None:
         metadata=blueprint.metadata,
         sections=sections,
     )
-    clear_paper_if_blueprint_changed(previous_blueprint)
+    clear_paper_if_blueprint_changed(previous_blueprint, reason="sections")
     if st.session_state.pending_section_delete is not None:
         confirm_section_delete()
 
@@ -899,10 +944,16 @@ def question_sections_step() -> None:
 def generation_step() -> None:
     render_step_heading("Generate and Review")
     selected_topics = [topic for topic in st.session_state.topics if topic.selected]
-    source_col, topic_col, section_col = st.columns(3)
-    source_col.metric("PDFs", len(st.session_state.documents))
-    topic_col.metric("Selected topics", len(selected_topics))
-    section_col.metric("Sections", len(st.session_state.blueprint.sections))
+    summary = generation_summary(
+        len(st.session_state.documents),
+        len(selected_topics),
+        st.session_state.blueprint,
+    )
+    for column, (label, value) in zip(st.columns(4), summary.items(), strict=True):
+        column.metric(label, value)
+
+    if st.session_state.paper_stale_notice:
+        st.warning(st.session_state.paper_stale_notice)
 
     api_key = load_secret("OPENAI_API_KEY")
     model = load_secret("OPENAI_MODEL", "gpt-4.1-mini")
@@ -920,8 +971,14 @@ def generation_step() -> None:
         )
         if not ready:
             st.info(message)
+    elif st.session_state.paper is None:
+        st.info("Everything is ready. Generate the paper when you are happy with the setup.")
 
-    generate_label = "Regenerate paper" if st.session_state.paper is not None else "Generate paper"
+    generate_label = (
+        "Regenerate paper"
+        if st.session_state.paper is not None
+        else "Generate paper"
+    )
     if st.button(generate_label, disabled=disabled, type="primary"):
         try:
             with st.spinner("Generating the question paper. This can take a minute."):
@@ -957,6 +1014,14 @@ def generation_step() -> None:
         return
 
     st.subheader("Review")
+    paper_wide_issues = [
+        issue
+        for issue in validate_export_ready_paper(st.session_state.blueprint, paper)
+        if not issue.section_label
+    ]
+    for issue in paper_wide_issues:
+        st.error(issue.message)
+
     for section_index, section in enumerate(paper.sections):
         configured_section = st.session_state.blueprint.sections[section_index]
         with st.expander(
@@ -1068,17 +1133,39 @@ def generation_step() -> None:
                         )
                         for sub_index in range(configured_section.questions_to_generate)
                     ]
-
-    issues = validate_export_ready_paper(st.session_state.blueprint, paper)
-    for issue in issues:
-        st.error(issue.message)
+            section_issues = [
+                issue
+                for issue in validate_export_ready_paper(
+                    st.session_state.blueprint, paper
+                )
+                if issue.section_label == section.label
+            ]
+            for issue in section_issues:
+                st.error(issue.message)
 
 
 def download_step() -> None:
     render_step_heading("Download Word Document")
     if st.session_state.paper is None:
-        st.info("Generate a valid paper before downloading.")
+        if st.session_state.paper_stale_notice:
+            st.warning(st.session_state.paper_stale_notice)
+        else:
+            st.info("Generate a valid paper before downloading.")
         return
+
+    metadata = st.session_state.blueprint.metadata
+    st.markdown(f"#### {metadata.exam_name}")
+    st.caption(f"Grade {metadata.grade} | {metadata.subject} | {metadata.date}")
+    download_summary = {
+        "Sources": f"{len(st.session_state.documents)} PDFs",
+        "Sections": str(len(st.session_state.blueprint.sections)),
+        "Total": f"{st.session_state.blueprint.total_marks()} marks",
+    }
+    for column, (label, value) in zip(
+        st.columns(3), download_summary.items(), strict=True
+    ):
+        column.metric(label, value)
+
     issues = validate_export_ready_paper(st.session_state.blueprint, st.session_state.paper)
     if issues:
         for issue in issues:

@@ -13,6 +13,7 @@ from app import (
     documents_after_extraction,
     extraction_success_message,
     format_metadata_date,
+    generation_summary,
     load_secret,
     paper_is_stale,
     parse_metadata_date,
@@ -21,6 +22,7 @@ from app import (
     should_auto_extract_topics,
     snapshot_documents,
     snapshot_selected_topics,
+    stale_paper_notice,
     step_ready,
     topics_by_document,
     upload_result_summary,
@@ -321,6 +323,35 @@ def test_paper_is_stale_when_blueprint_changes():
     )
 
 
+def test_paper_is_stale_when_sections_are_reordered():
+    blueprint = default_blueprint()
+    second_section = SectionBlueprint(
+        label="Section B",
+        heading="Short Answer Questions",
+        question_type=QuestionType.SHORT,
+        questions_to_generate=2,
+        questions_to_answer=2,
+        marks_per_question=2,
+    )
+    previous_blueprint = blueprint.model_copy(
+        update={"sections": [*blueprint.sections, second_section]},
+        deep=True,
+    ).model_dump(mode="json")
+    reordered_blueprint = blueprint.model_copy(
+        update={"sections": [second_section, *blueprint.sections]},
+        deep=True,
+    ).model_dump(mode="json")
+
+    assert paper_is_stale(
+        previous_documents=[],
+        new_documents=[],
+        previous_topics=[],
+        new_topics=[],
+        previous_blueprint=previous_blueprint,
+        new_blueprint=reordered_blueprint,
+    )
+
+
 def test_validate_export_ready_paper_reports_invalid_manual_edits():
     defaults = default_blueprint()
     blueprint = PaperBlueprint(
@@ -545,6 +576,23 @@ def test_build_generation_inputs_snapshot_uses_selected_topics_and_blueprint_jso
 
     assert [topic["id"] for topic in snapshot["topics"]] == ["selected-topic"]
     assert snapshot["blueprint"] == blueprint.model_dump(mode="json")
+
+
+def test_generation_summary_reports_all_inputs():
+    blueprint = default_blueprint()
+
+    assert generation_summary(2, 5, blueprint) == {
+        "Sources": "2 PDFs",
+        "Topics": "5 selected",
+        "Sections": "1",
+        "Total": "4 marks",
+    }
+
+
+def test_stale_paper_notice_is_teacher_facing():
+    assert stale_paper_notice("sections") == (
+        "Your section setup changed. Generate the paper again before downloading."
+    )
 
 
 def test_clear_section_widget_state_removes_only_section_editor_keys():
