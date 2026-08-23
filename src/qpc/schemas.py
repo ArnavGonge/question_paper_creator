@@ -17,6 +17,11 @@ class QuestionType(StrEnum):
     MAP_DIAGRAM = "map_diagram"
 
 
+class ExerciseType(StrEnum):
+    QUESTION_PAPER = "question_paper"
+    SKILL_SHEET = "skill_sheet"
+
+
 class SourcePage(BaseModel):
     page_number: int = Field(ge=1)
     text: str
@@ -104,6 +109,7 @@ class PaperBlueprint(BaseModel):
 class GeneratedQuestion(BaseModel):
     question_type: QuestionType
     text: str
+    answer: str = ""
     options: list[str] = Field(default_factory=list)
     pairs: list[tuple[str, str]] = Field(default_factory=list)
     sub_questions: list[str] = Field(default_factory=list)

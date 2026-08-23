@@ -8,7 +8,11 @@ from typing import Any
 import streamlit as st
 
 from qpc.demo_data import default_blueprint
-from qpc.docx_exporter import render_docx
+from qpc.docx_exporter import (
+    render_answer_key_docx,
+    render_docx,
+    render_skill_sheet_docx,
+)
 from qpc.error_reporting import (
     AppConfigurationError,
     report_operation_error,
@@ -24,6 +28,7 @@ from qpc.presentation import (
 )
 from qpc.question_generator import generate_questions_with_ai
 from qpc.schemas import (
+    ExerciseType,
     GeneratedPaper,
     GeneratedSection,
     PaperBlueprint,
@@ -50,6 +55,7 @@ def load_secret(name: str, default: str = "") -> str:
 
 
 WIZARD_STEPS = (
+    "Exercise Type",
     "Upload PDFs",
     "Topics",
     "Paper Details",
@@ -57,13 +63,16 @@ WIZARD_STEPS = (
     "Generate and Review",
     "Download Word Document",
 )
+DEFAULT_EXERCISE_TYPE = ExerciseType.QUESTION_PAPER
 MAX_UPLOAD_PDFS = 5
+UPLOAD_WIDGET_KEY = "uploaded_pdfs"
 PRIMARY_ACTIONS = (
-    "Extract text",
+    "Add PDFs",
+    "Choose topics",
     "Choose topics",
     "Save details",
     "Build sections",
-    "Generate paper",
+    "Generate",
     "Download Word document",
 )
 SECTION_WIDGET_PREFIXES = (
@@ -122,6 +131,16 @@ def wizard_sidebar_state(step_index: int, current_step: int, ready: bool) -> str
     return "Locked"
 
 
+def include_marks_for_exercise(exercise_type: ExerciseType) -> bool:
+    return exercise_type is ExerciseType.QUESTION_PAPER
+
+
+def exercise_type_label(exercise_type: ExerciseType) -> str:
+    if exercise_type is ExerciseType.SKILL_SHEET:
+        return "Skill Sheet"
+    return "Question Paper"
+
+
 def selected_topic_count(topics: list[Topic]) -> int:
     return len([topic for topic in topics if topic.selected])
 
@@ -157,15 +176,15 @@ def generation_summary(
 
 
 STALE_PAPER_MESSAGES = {
-    "sources": "Your source PDFs changed. Choose topics and generate the paper again.",
+    "sources": "Your source PDFs changed. Choose topics and generate the exercise again.",
     "topics": (
-        "Your topic selection changed. Generate the paper again before downloading."
+        "Your topic selection changed. Generate the exercise again before downloading."
     ),
     "details": (
-        "Your paper details changed. Generate the paper again before downloading."
+        "Your exercise details changed. Generate the exercise again before downloading."
     ),
     "sections": (
-        "Your section setup changed. Generate the paper again before downloading."
+        "Your section setup changed. Generate the exercise again before downloading."
     ),
 }
 
@@ -183,14 +202,14 @@ def step_ready(
     paper: GeneratedPaper | None,
 ) -> tuple[bool, str]:
     current = clamp_step(step)
-    if current >= 1 and not documents:
+    if current >= 2 and not documents:
         return False, "Upload and extract at least one PDF first."
-    if current >= 2 and not topics:
+    if current >= 3 and not topics:
         return False, "Find topics from the PDFs first."
-    if current >= 2 and selected_topic_count(topics) == 0:
+    if current >= 3 and selected_topic_count(topics) == 0:
         return False, "Select at least one topic first."
-    if current >= 5 and paper is None:
-        return False, "Generate a valid question paper first."
+    if current >= 6 and paper is None:
+        return False, "Generate a valid exercise first."
     return True, ""
 
 
@@ -220,11 +239,13 @@ def build_generation_inputs_snapshot(
     documents: list,
     topics: list[Topic],
     blueprint: PaperBlueprint,
+    exercise_type: ExerciseType,
 ) -> dict:
     return {
         "documents": snapshot_documents(documents),
         "topics": snapshot_selected_topics(topics),
         "blueprint": blueprint.model_dump(mode="json"),
+        "exercise_type": exercise_type.value,
     }
 
 
@@ -255,11 +276,14 @@ def paper_is_stale(
     new_topics: list[dict],
     previous_blueprint: dict,
     new_blueprint: dict,
+    previous_exercise_type: str = "",
+    new_exercise_type: str = "",
 ) -> bool:
     return (
         previous_documents != new_documents
         or previous_topics != new_topics
         or previous_blueprint != new_blueprint
+        or previous_exercise_type != new_exercise_type
     )
 
 
@@ -413,6 +437,7 @@ def run_generation(
     blueprint: PaperBlueprint,
     api_key: str,
     model: str,
+    exercise_type: ExerciseType,
 ) -> GeneratedPaper:
     if not api_key:
         raise AppConfigurationError("openai")
@@ -422,6 +447,7 @@ def run_generation(
         blueprint,
         api_key=api_key,
         model=model,
+        exercise_type=exercise_type,
     )
 
 
@@ -431,12 +457,14 @@ def save_generated_paper(
     documents: list,
     topics: list[Topic],
     blueprint: PaperBlueprint,
+    exercise_type: ExerciseType,
 ) -> None:
     st.session_state.paper = paper
     st.session_state.paper_inputs = build_generation_inputs_snapshot(
         documents=documents,
         topics=topics,
         blueprint=blueprint,
+        exercise_type=exercise_type,
     )
     st.session_state.paper_stale_notice = ""
 
@@ -446,6 +474,8 @@ def ensure_state() -> None:
         st.session_state.authenticated = False
     if "wizard_step" not in st.session_state:
         st.session_state.wizard_step = 0
+    if "exercise_type" not in st.session_state:
+        st.session_state.exercise_type = DEFAULT_EXERCISE_TYPE
     if "documents" not in st.session_state:
         st.session_state.documents = []
     if "topics" not in st.session_state:
@@ -482,6 +512,7 @@ def clear_paper_if_blueprint_changed(
     documents_snapshot = snapshot_documents(st.session_state.documents)
     topics_snapshot = snapshot_selected_topics(st.session_state.topics)
     new_blueprint = st.session_state.blueprint.model_dump(mode="json")
+    exercise_type = st.session_state.exercise_type
     if st.session_state.paper is not None and paper_is_stale(
         previous_documents=(
             previous_inputs["documents"] if previous_inputs is not None else documents_snapshot
@@ -495,12 +526,22 @@ def clear_paper_if_blueprint_changed(
             previous_inputs["blueprint"] if previous_inputs is not None else previous_blueprint
         ),
         new_blueprint=new_blueprint,
+        previous_exercise_type=(
+            previous_inputs["exercise_type"]
+            if previous_inputs is not None
+            else exercise_type.value
+        ),
+        new_exercise_type=exercise_type.value,
     ):
         invalidate_generated_paper(reason)
 
 
 def cancel_section_delete() -> None:
     st.session_state.pending_section_delete = None
+
+
+def section_header_label(section: SectionBlueprint, index: int) -> str:
+    return str(st.session_state.get(f"label_{index}", section.label))
 
 
 @st.dialog(
@@ -584,6 +625,39 @@ def upload_result_summary(success_count: int, failure_count: int) -> str:
     )
 
 
+def extract_uploaded_files(files: list) -> bool:
+    previous_documents = snapshot_documents(st.session_state.documents)
+    documents = []
+    errors = []
+    for file in files:
+        try:
+            documents.append(extract_pdf_bytes(file.name, file.getvalue()))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(
+                (
+                    file.name,
+                    report_operation_error(
+                        "pdf_extraction",
+                        exc,
+                        context={"filename": file.name},
+                    ),
+                )
+            )
+    st.session_state.upload_errors = errors
+    st.session_state.upload_result_message = upload_result_summary(
+        len(documents), len(errors)
+    )
+    st.session_state.documents = documents_after_extraction(
+        st.session_state.documents,
+        documents,
+    )
+    new_documents = snapshot_documents(st.session_state.documents)
+    if previous_documents != new_documents:
+        st.session_state.topics = []
+        invalidate_generated_paper("sources")
+    return not errors and bool(documents)
+
+
 def render_wizard_progress() -> None:
     current = clamp_step(st.session_state.wizard_step)
     st.session_state.wizard_step = current
@@ -616,59 +690,55 @@ def navigation_controls() -> None:
         if current == len(WIZARD_STEPS) - 1:
             st.button("Next", disabled=True, use_container_width=True)
             return
-        ready, _ = step_ready(
-            current + 1,
-            documents=st.session_state.documents,
-            topics=st.session_state.topics,
-            blueprint=st.session_state.blueprint,
-            paper=st.session_state.paper,
-        )
+        uploaded_files = st.session_state.get(UPLOAD_WIDGET_KEY, []) or []
+        if current == 1 and uploaded_files:
+            ready = True
+        else:
+            ready, _ = step_ready(
+                current + 1,
+                documents=st.session_state.documents,
+                topics=st.session_state.topics,
+                blueprint=st.session_state.blueprint,
+                paper=st.session_state.paper,
+            )
         label = f"Next: {wizard_primary_action(current + 1)}"
         if st.button(label, disabled=not ready, use_container_width=True):
+            if current == 1 and uploaded_files:
+                with st.spinner("Reading the PDFs and extracting page text..."):
+                    if not extract_uploaded_files(uploaded_files):
+                        st.rerun()
             st.session_state.wizard_step = clamp_step(current + 1)
             st.rerun()
+
+
+def exercise_type_step() -> None:
+    render_step_heading("Exercise Type")
+    previous_exercise_type = st.session_state.exercise_type
+    st.session_state.exercise_type = st.radio(
+        "Exercise type",
+        list(ExerciseType),
+        index=list(ExerciseType).index(previous_exercise_type),
+        format_func=exercise_type_label,
+        horizontal=True,
+    )
+    if st.session_state.exercise_type != previous_exercise_type:
+        invalidate_generated_paper("details")
 
 
 def upload_step() -> None:
     render_step_heading("Upload PDFs")
     st.caption(f"PDF only. Recommended: {MAX_UPLOAD_PDFS} or fewer files.")
-    files = st.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
+    files = st.file_uploader(
+        "Upload PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key=UPLOAD_WIDGET_KEY,
+    )
     if files:
         st.caption(f"{metric_text(len(files), 'file')} selected")
         limit_message = uploaded_pdf_limit_message(len(files))
         if limit_message:
             st.warning(limit_message)
-    if st.button("Extract text", disabled=not files, type="primary"):
-        previous_documents = snapshot_documents(st.session_state.documents)
-        documents = []
-        errors = []
-        with st.spinner("Reading the PDFs and extracting page text..."):
-            for file in files:
-                try:
-                    documents.append(extract_pdf_bytes(file.name, file.getvalue()))
-                except Exception as exc:  # noqa: BLE001
-                    errors.append(
-                        (
-                            file.name,
-                            report_operation_error(
-                                "pdf_extraction",
-                                exc,
-                                context={"filename": file.name},
-                            ),
-                        )
-                    )
-        st.session_state.upload_errors = errors
-        st.session_state.upload_result_message = upload_result_summary(
-            len(documents), len(errors)
-        )
-        st.session_state.documents = documents_after_extraction(
-            st.session_state.documents,
-            documents,
-        )
-        new_documents = snapshot_documents(st.session_state.documents)
-        if previous_documents != new_documents:
-            st.session_state.topics = []
-            invalidate_generated_paper("sources")
     if st.session_state.upload_result_message:
         if st.session_state.upload_errors:
             st.warning(st.session_state.upload_result_message)
@@ -724,10 +794,6 @@ def topics_step() -> None:
     blueprint_snapshot = st.session_state.blueprint.model_dump(mode="json")
     updated_topics: list[Topic] = []
 
-    st.metric(
-        "Selected topics",
-        f"{selected_topic_count(st.session_state.topics)} of {len(st.session_state.topics)}",
-    )
     for filename, document_topics in topics_by_document(
         st.session_state.topics
     ).items():
@@ -757,6 +823,12 @@ def topics_step() -> None:
             previous_inputs["blueprint"] if previous_inputs is not None else blueprint_snapshot
         ),
         new_blueprint=blueprint_snapshot,
+        previous_exercise_type=(
+            previous_inputs["exercise_type"]
+            if previous_inputs is not None
+            else st.session_state.exercise_type.value
+        ),
+        new_exercise_type=st.session_state.exercise_type.value,
     ):
         invalidate_generated_paper("topics")
 
@@ -785,7 +857,7 @@ def paper_details_step() -> None:
     metadata.subject = subject_col.text_input("Subject", metadata.subject)
     metadata.exam_name = st.text_input("Exam name", metadata.exam_name)
 
-    date_col, duration_col, total_col = st.columns(3)
+    date_col, duration_col = st.columns(2)
     selected_date = date_col.date_input(
         "Date",
         value=parse_metadata_date(metadata.date),
@@ -793,8 +865,6 @@ def paper_details_step() -> None:
     )
     metadata.date = format_metadata_date(selected_date)
     metadata.duration = duration_col.text_input("Time", metadata.duration)
-    total_col.metric("Calculated marks", blueprint.total_marks())
-    total_col.caption("Change this total in Question Sections.")
 
     st.session_state.blueprint = PaperBlueprint(
         metadata=metadata,
@@ -807,27 +877,15 @@ def question_sections_step() -> None:
     render_step_heading("Question Sections")
     blueprint: PaperBlueprint = st.session_state.blueprint
     previous_blueprint = blueprint.model_dump(mode="json")
-
-    total_col, add_col = st.columns([3, 1])
-    total_col.metric("Paper total", f"{blueprint.total_marks()} marks")
-    if add_col.button(
-        "Add section",
-        icon=":material/add:",
-        type="primary",
-        use_container_width=True,
-    ):
-        st.session_state.blueprint = PaperBlueprint(
-            metadata=blueprint.metadata,
-            sections=append_default_section(blueprint.sections),
-        )
-        clear_section_widget_state(st.session_state)
-        clear_paper_if_blueprint_changed(previous_blueprint, reason="sections")
-        st.rerun()
+    include_marks = include_marks_for_exercise(st.session_state.exercise_type)
 
     sections: list[SectionBlueprint] = []
     for index, section in enumerate(blueprint.sections):
         expanded = index == 0
-        with st.expander(section_header(section), expanded=expanded):
+        header_section = section.model_copy(
+            update={"label": section_header_label(section, index)}
+        )
+        with st.expander(section_header(header_section), expanded=expanded):
             move_up_col, move_down_col, delete_col = st.columns(3)
             if move_up_col.button(
                 "Move up",
@@ -899,27 +957,34 @@ def question_sections_step() -> None:
                 key=f"instruction_{index}",
             )
 
-            generate_col, answer_col, marks_col, subtotal_col = st.columns(4)
+            if include_marks:
+                generate_col, answer_col, marks_col, subtotal_col = st.columns(4)
+            else:
+                generate_col = st.container()
             generate = generate_col.number_input(
-                "Questions to generate",
+                "Total questions",
                 min_value=1,
                 value=section.questions_to_generate,
                 key=f"gen_{index}",
             )
-            answer = answer_col.number_input(
-                "Questions to answer",
-                min_value=1,
-                max_value=generate,
-                value=min(section.questions_to_answer, generate),
-                key=f"ans_{index}",
-            )
-            marks = marks_col.number_input(
-                "Marks per question",
-                min_value=1,
-                value=section.marks_per_question,
-                key=f"marks_{index}",
-            )
-            subtotal_col.metric("Section total", f"{answer * marks} marks")
+            if include_marks:
+                answer = answer_col.number_input(
+                    "Compulsory questions",
+                    min_value=1,
+                    max_value=generate,
+                    value=min(section.questions_to_answer, generate),
+                    key=f"ans_{index}",
+                )
+                marks = marks_col.number_input(
+                    "Marks per question",
+                    min_value=1,
+                    value=section.marks_per_question,
+                    key=f"marks_{index}",
+                )
+                subtotal_col.metric("Section total", f"{answer * marks} marks")
+            else:
+                answer = generate
+                marks = 1
             sections.append(
                 SectionBlueprint(
                     label=label,
@@ -932,11 +997,28 @@ def question_sections_step() -> None:
                 )
             )
 
-    st.session_state.blueprint = PaperBlueprint(
+    current_blueprint = PaperBlueprint(
         metadata=blueprint.metadata,
         sections=sections,
     )
+    st.session_state.blueprint = current_blueprint
     clear_paper_if_blueprint_changed(previous_blueprint, reason="sections")
+    total_col, add_col = st.columns([3, 1])
+    if include_marks:
+        total_col.metric("Paper total", f"{current_blueprint.total_marks()} marks")
+    if add_col.button(
+        "Add section",
+        icon=":material/add:",
+        type="primary",
+        use_container_width=True,
+    ):
+        st.session_state.blueprint = PaperBlueprint(
+            metadata=current_blueprint.metadata,
+            sections=append_default_section(current_blueprint.sections),
+        )
+        clear_section_widget_state(st.session_state)
+        clear_paper_if_blueprint_changed(previous_blueprint, reason="sections")
+        st.rerun()
     if st.session_state.pending_section_delete is not None:
         confirm_section_delete()
 
@@ -944,12 +1026,21 @@ def question_sections_step() -> None:
 def generation_step() -> None:
     render_step_heading("Generate and Review")
     selected_topics = [topic for topic in st.session_state.topics if topic.selected]
+    include_marks = include_marks_for_exercise(st.session_state.exercise_type)
     summary = generation_summary(
         len(st.session_state.documents),
         len(selected_topics),
         st.session_state.blueprint,
     )
-    for column, (label, value) in zip(st.columns(4), summary.items(), strict=True):
+    summary = {
+        "Type": exercise_type_label(st.session_state.exercise_type),
+        **summary,
+    }
+    if not include_marks:
+        summary.pop("Total")
+    for column, (label, value) in zip(
+        st.columns(len(summary)), summary.items(), strict=True
+    ):
         column.metric(label, value)
 
     if st.session_state.paper_stale_notice:
@@ -963,7 +1054,7 @@ def generation_step() -> None:
     )
     if disabled:
         ready, message = step_ready(
-            4,
+            5,
             documents=st.session_state.documents,
             topics=st.session_state.topics,
             blueprint=st.session_state.blueprint,
@@ -972,22 +1063,23 @@ def generation_step() -> None:
         if not ready:
             st.info(message)
     elif st.session_state.paper is None:
-        st.info("Everything is ready. Generate the paper when you are happy with the setup.")
+        st.info("Everything is ready. Generate the exercise when you are happy with the setup.")
 
     generate_label = (
-        "Regenerate paper"
+        f"Regenerate {exercise_type_label(st.session_state.exercise_type).lower()}"
         if st.session_state.paper is not None
-        else "Generate paper"
+        else f"Generate {exercise_type_label(st.session_state.exercise_type).lower()}"
     )
     if st.button(generate_label, disabled=disabled, type="primary"):
         try:
-            with st.spinner("Generating the question paper. This can take a minute."):
+            with st.spinner("Generating the exercise. This can take a minute."):
                 paper = run_generation(
                     documents=st.session_state.documents,
                     topics=selected_topics,
                     blueprint=st.session_state.blueprint,
                     api_key=api_key,
                     model=model,
+                    exercise_type=st.session_state.exercise_type,
                 )
             issues = validate_generated_paper(st.session_state.blueprint, paper)
             if issues:
@@ -1004,8 +1096,9 @@ def generation_step() -> None:
                     documents=st.session_state.documents,
                     topics=st.session_state.topics,
                     blueprint=st.session_state.blueprint,
+                    exercise_type=st.session_state.exercise_type,
                 )
-                st.success("Question paper generated.")
+                st.success(f"{exercise_type_label(st.session_state.exercise_type)} generated.")
         except Exception as exc:  # noqa: BLE001
             render_error_report(report_operation_error("paper_generation", exc))
 
@@ -1045,6 +1138,7 @@ def generation_step() -> None:
                             blueprint=single_section_blueprint,
                             api_key=api_key,
                             model=model,
+                            exercise_type=st.session_state.exercise_type,
                         )
                     issues = validate_generated_paper(single_section_blueprint, regenerated)
                     if issues:
@@ -1066,6 +1160,7 @@ def generation_step() -> None:
                             documents=st.session_state.documents,
                             topics=st.session_state.topics,
                             blueprint=st.session_state.blueprint,
+                            exercise_type=st.session_state.exercise_type,
                         )
                         paper = updated_paper
                         section = paper.sections[section_index]
@@ -1133,6 +1228,11 @@ def generation_step() -> None:
                         )
                         for sub_index in range(configured_section.questions_to_generate)
                     ]
+                question.answer = st.text_area(
+                    f"Answer {question_index + 1}",
+                    question.answer,
+                    key=f"answer_{section_index}_{question_index}",
+                )
             section_issues = [
                 issue
                 for issue in validate_export_ready_paper(
@@ -1150,19 +1250,22 @@ def download_step() -> None:
         if st.session_state.paper_stale_notice:
             st.warning(st.session_state.paper_stale_notice)
         else:
-            st.info("Generate a valid paper before downloading.")
+            st.info("Generate a valid exercise before downloading.")
         return
 
     metadata = st.session_state.blueprint.metadata
+    include_marks = include_marks_for_exercise(st.session_state.exercise_type)
     st.markdown(f"#### {metadata.exam_name}")
     st.caption(f"Grade {metadata.grade} | {metadata.subject} | {metadata.date}")
     download_summary = {
+        "Type": exercise_type_label(st.session_state.exercise_type),
         "Sources": f"{len(st.session_state.documents)} PDFs",
         "Sections": str(len(st.session_state.blueprint.sections)),
-        "Total": f"{st.session_state.blueprint.total_marks()} marks",
     }
+    if include_marks:
+        download_summary["Total"] = f"{st.session_state.blueprint.total_marks()} marks"
     for column, (label, value) in zip(
-        st.columns(3), download_summary.items(), strict=True
+        st.columns(len(download_summary)), download_summary.items(), strict=True
     ):
         column.metric(label, value)
 
@@ -1170,19 +1273,46 @@ def download_step() -> None:
     if issues:
         for issue in issues:
             st.error(issue.message)
-        st.info("Fix the paper issues above before downloading.")
+        st.info("Fix the exercise issues above before downloading.")
         return
     try:
-        data = render_docx(st.session_state.blueprint, st.session_state.paper)
+        if include_marks:
+            paper_data = render_docx(st.session_state.blueprint, st.session_state.paper)
+            answers_data = render_answer_key_docx(
+                st.session_state.blueprint,
+                st.session_state.paper,
+            )
+        else:
+            skill_sheet_data = render_skill_sheet_docx(
+                st.session_state.blueprint,
+                st.session_state.paper,
+            )
     except Exception as exc:  # noqa: BLE001
         render_error_report(report_operation_error("document_export", exc))
         return
-    st.download_button(
-        "Download Word document",
-        data=data,
-        file_name="question-paper.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    if include_marks:
+        paper_col, answers_col = st.columns(2)
+        paper_col.download_button(
+            "Download question paper",
+            data=paper_data,
+            file_name="question-paper.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+        answers_col.download_button(
+            "Download answer key",
+            data=answers_data,
+            file_name="answer-key.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+    else:
+        st.download_button(
+            "Download skill sheet",
+            data=skill_sheet_data,
+            file_name="skill-sheet.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
 
 def main() -> None:
@@ -1194,16 +1324,18 @@ def main() -> None:
     render_wizard_progress()
     current = clamp_step(st.session_state.wizard_step)
     if current == 0:
-        upload_step()
+        exercise_type_step()
     elif current == 1:
-        topics_step()
+        upload_step()
     elif current == 2:
-        paper_details_step()
+        topics_step()
     elif current == 3:
-        question_sections_step()
+        paper_details_step()
     elif current == 4:
-        generation_step()
+        question_sections_step()
     elif current == 5:
+        generation_step()
+    elif current == 6:
         download_step()
     navigation_controls()
 

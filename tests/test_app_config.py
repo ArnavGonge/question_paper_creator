@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from app import (
+    DEFAULT_EXERCISE_TYPE,
     MAX_UPLOAD_PDFS,
     WIZARD_STEPS,
     build_generation_inputs_snapshot,
@@ -14,6 +15,7 @@ from app import (
     extraction_success_message,
     format_metadata_date,
     generation_summary,
+    include_marks_for_exercise,
     load_secret,
     paper_is_stale,
     parse_metadata_date,
@@ -36,6 +38,7 @@ from app import (
 )
 from qpc.demo_data import default_blueprint
 from qpc.schemas import (
+    ExerciseType,
     GeneratedPaper,
     GeneratedQuestion,
     GeneratedSection,
@@ -60,6 +63,7 @@ def test_load_secret_returns_default_for_missing_value(monkeypatch):
 
 def test_wizard_steps_are_fixed_for_guided_flow():
     assert WIZARD_STEPS == (
+        "Exercise Type",
         "Upload PDFs",
         "Topics",
         "Paper Details",
@@ -67,10 +71,16 @@ def test_wizard_steps_are_fixed_for_guided_flow():
         "Generate and Review",
         "Download Word Document",
     )
-    assert wizard_step_label(1) == "Step 2 of 6: Topics"
-    assert wizard_progress(2) == 3 / 6
+    assert wizard_step_label(2) == "Step 3 of 7: Topics"
+    assert wizard_progress(3) == 4 / 7
     assert clamp_step(-1) == 0
-    assert clamp_step(99) == 5
+    assert clamp_step(99) == 6
+
+
+def test_default_exercise_type_keeps_current_question_paper_flow():
+    assert DEFAULT_EXERCISE_TYPE is ExerciseType.QUESTION_PAPER
+    assert include_marks_for_exercise(ExerciseType.QUESTION_PAPER) is True
+    assert include_marks_for_exercise(ExerciseType.SKILL_SHEET) is False
 
 
 def test_upload_limit_message_only_warns_above_suggested_limit():
@@ -139,14 +149,15 @@ def test_wizard_sidebar_state_distinguishes_available_from_completed():
 
 
 def test_wizard_primary_action_uses_short_teacher_facing_labels():
-    assert wizard_primary_action(0) == "Extract text"
+    assert wizard_primary_action(0) == "Add PDFs"
     assert wizard_primary_action(1) == "Choose topics"
-    assert wizard_primary_action(4) == "Generate paper"
+    assert wizard_primary_action(2) == "Choose topics"
+    assert wizard_primary_action(5) == "Generate"
 
 
 def test_wizard_progress_label_is_secondary_and_short():
-    assert wizard_progress_label(0) == "Step 1 of 6"
-    assert wizard_progress_label(5) == "Step 6 of 6"
+    assert wizard_progress_label(0) == "Step 1 of 7"
+    assert wizard_progress_label(6) == "Step 7 of 7"
 
 
 def test_topics_auto_extract_only_after_documents_before_topics_exist():
@@ -187,7 +198,7 @@ def test_step_ready_guides_incomplete_flow():
     blueprint = default_blueprint()
 
     ready, message = step_ready(
-        1,
+        2,
         documents=[],
         topics=[],
         blueprint=blueprint,
@@ -215,7 +226,7 @@ def test_step_ready_requires_selected_topics_before_paper_details():
     ]
 
     ready, message = step_ready(
-        2,
+        3,
         documents=documents,
         topics=topics,
         blueprint=blueprint,
@@ -243,7 +254,7 @@ def test_step_ready_allows_generation_when_inputs_and_blueprint_are_ready():
     ]
 
     ready, message = step_ready(
-        4,
+        5,
         documents=documents,
         topics=topics,
         blueprint=blueprint,
@@ -271,7 +282,7 @@ def test_step_ready_requires_generated_paper_before_download():
     ]
 
     ready, message = step_ready(
-        5,
+        6,
         documents=documents,
         topics=topics,
         blueprint=blueprint,
@@ -279,7 +290,7 @@ def test_step_ready_requires_generated_paper_before_download():
     )
 
     assert ready is False
-    assert message == "Generate a valid question paper first."
+    assert message == "Generate a valid exercise first."
 
 
 def test_paper_is_stale_when_selected_topics_change():
@@ -572,10 +583,12 @@ def test_build_generation_inputs_snapshot_uses_selected_topics_and_blueprint_jso
         documents=[],
         topics=topics,
         blueprint=blueprint,
+        exercise_type=ExerciseType.QUESTION_PAPER,
     )
 
     assert [topic["id"] for topic in snapshot["topics"]] == ["selected-topic"]
     assert snapshot["blueprint"] == blueprint.model_dump(mode="json")
+    assert snapshot["exercise_type"] == "question_paper"
 
 
 def test_generation_summary_reports_all_inputs():
@@ -591,7 +604,7 @@ def test_generation_summary_reports_all_inputs():
 
 def test_stale_paper_notice_is_teacher_facing():
     assert stale_paper_notice("sections") == (
-        "Your section setup changed. Generate the paper again before downloading."
+        "Your section setup changed. Generate the exercise again before downloading."
     )
 
 

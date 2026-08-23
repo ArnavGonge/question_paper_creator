@@ -15,9 +15,7 @@ from qpc.schemas import (
 
 def render_docx(blueprint: PaperBlueprint, paper: GeneratedPaper) -> bytes:
     document = Document()
-    style = document.styles["Normal"]
-    style.font.name = "Times New Roman"
-    style.font.size = Pt(11)
+    _apply_document_style(document)
 
     _add_header(document, blueprint)
     sections_by_label = {section.label: section for section in paper.sections}
@@ -33,7 +31,57 @@ def render_docx(blueprint: PaperBlueprint, paper: GeneratedPaper) -> bytes:
     return output.getvalue()
 
 
-def _add_header(document: Document, blueprint: PaperBlueprint) -> None:
+def render_answer_key_docx(blueprint: PaperBlueprint, paper: GeneratedPaper) -> bytes:
+    document = Document()
+    _apply_document_style(document)
+
+    _add_header(document, blueprint, include_marks=False, title_suffix="Answer Key")
+    _add_answers(document, blueprint, paper)
+
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def render_skill_sheet_docx(blueprint: PaperBlueprint, paper: GeneratedPaper) -> bytes:
+    document = Document()
+    _apply_document_style(document)
+
+    _add_header(document, blueprint, include_marks=False)
+    sections_by_label = {section.label: section for section in paper.sections}
+    for section_blueprint in blueprint.sections:
+        generated_section = sections_by_label[section_blueprint.label]
+        _add_section(
+            document,
+            section_blueprint,
+            generated_section,
+            include_marks=False,
+        )
+
+    document.add_page_break()
+    answers_heading = document.add_paragraph("Answers")
+    answers_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    answers_heading.runs[0].bold = True
+    _add_answers(document, blueprint, paper)
+
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def _apply_document_style(document: Document) -> None:
+    style = document.styles["Normal"]
+    style.font.name = "Times New Roman"
+    style.font.size = Pt(11)
+
+
+def _add_header(
+    document: Document,
+    blueprint: PaperBlueprint,
+    *,
+    include_marks: bool = True,
+    title_suffix: str = "",
+) -> None:
     metadata = blueprint.metadata
     school = document.add_paragraph(metadata.school_name)
     school.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -45,7 +93,12 @@ def _add_header(document: Document, blueprint: PaperBlueprint) -> None:
     affiliation = document.add_paragraph(f"({metadata.affiliation})")
     affiliation.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    exam = document.add_paragraph(metadata.exam_name)
+    exam_title = (
+        f"{metadata.exam_name} - {title_suffix}"
+        if title_suffix
+        else metadata.exam_name
+    )
+    exam = document.add_paragraph(exam_title)
     exam.alignment = WD_ALIGN_PARAGRAPH.CENTER
     exam.runs[0].bold = True
 
@@ -57,10 +110,14 @@ def _add_header(document: Document, blueprint: PaperBlueprint) -> None:
     table.cell(2, 0).text = "Roll No: - _______"
     table.cell(2, 1).text = (
         f"M.M. {blueprint.total_marks()}        Time- {metadata.duration}"
+        if include_marks
+        else f"Time- {metadata.duration}"
     )
 
 
-def _section_summary(section: SectionBlueprint) -> str:
+def _section_summary(section: SectionBlueprint, *, include_marks: bool = True) -> str:
+    if not include_marks:
+        return section.heading
     total = section.section_marks()
     if section.questions_to_answer < section.questions_to_generate:
         return (
@@ -77,12 +134,16 @@ def _add_section(
     document: Document,
     section_blueprint: SectionBlueprint,
     generated_section: GeneratedSection,
+    *,
+    include_marks: bool = True,
 ) -> None:
     label = document.add_paragraph(section_blueprint.label)
     label.alignment = WD_ALIGN_PARAGRAPH.CENTER
     label.runs[0].bold = True
 
-    summary = document.add_paragraph(_section_summary(section_blueprint))
+    summary = document.add_paragraph(
+        _section_summary(section_blueprint, include_marks=include_marks)
+    )
     summary.alignment = WD_ALIGN_PARAGRAPH.CENTER
     summary.runs[0].bold = True
 
@@ -102,3 +163,24 @@ def _add_section(
                 document.add_paragraph(f"{left} - {right}")
         for sub_index, sub_question in enumerate(question.sub_questions, start=1):
             document.add_paragraph(f"({sub_index}) {sub_question}")
+
+
+def _add_answers(
+    document: Document,
+    blueprint: PaperBlueprint,
+    paper: GeneratedPaper,
+) -> None:
+    sections_by_label = {section.label: section for section in paper.sections}
+    for section_blueprint in blueprint.sections:
+        generated_section = sections_by_label[section_blueprint.label]
+        label = document.add_paragraph(section_blueprint.label)
+        label.runs[0].bold = True
+        for index, question in enumerate(generated_section.questions, start=1):
+            document.add_paragraph(f"{index}. {_answer_text(question.answer)}")
+
+
+def _answer_text(answer: str) -> str:
+    cleaned = answer.strip()
+    if cleaned:
+        return cleaned
+    return "Answer not generated."

@@ -16,9 +16,13 @@ class StepCopy:
 
 
 STEP_COPY = {
+    "Exercise Type": StepCopy(
+        "Choose exercise type",
+        "Start with a marks-based paper or a practice sheet with answers.",
+    ),
     "Upload PDFs": StepCopy(
         "Add source material",
-        "Choose the textbook PDFs this paper should use.",
+        "Choose the textbook PDFs this exercise should use.",
     ),
     "Topics": StepCopy(
         "Choose topics",
@@ -30,7 +34,7 @@ STEP_COPY = {
     ),
     "Question Sections": StepCopy(
         "Build question sections",
-        "Set the question mix and marks for each part of the paper.",
+        "Set the question mix for each part of the exercise.",
     ),
     "Generate and Review": StepCopy(
         "Generate and review",
@@ -71,18 +75,8 @@ APP_CSS = """
   --qpc-success: #18794e;
 }
 
-.stApp {
-  background: var(--qpc-canvas);
-  color: var(--qpc-text);
-}
-
 [data-testid="stHeader"] {
   background: rgba(245, 247, 248, 0.94);
-}
-
-[data-testid="stSidebar"] {
-  background: var(--qpc-surface);
-  border-right: 1px solid var(--qpc-border);
 }
 
 .block-container {
@@ -184,13 +178,7 @@ hr {
 
 
 def section_header(section: SectionBlueprint) -> str:
-    mark_label = "mark" if section.marks_per_question == 1 else "marks"
-    return (
-        f"{section.label} | {QUESTION_TYPE_LABELS[section.question_type]} | "
-        f"Answer {section.questions_to_answer} | "
-        f"{section.marks_per_question} {mark_label} each | "
-        f"{section.section_marks()} marks"
-    )
+    return section.label
 
 
 def error_report_text(report: ErrorReport) -> str:

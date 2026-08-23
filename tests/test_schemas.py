@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from qpc.schemas import (
+    ExerciseType,
     GeneratedPaper,
     GeneratedQuestion,
     GeneratedSection,
@@ -14,6 +15,20 @@ from qpc.schemas import (
     Topic,
     TopicSet,
 )
+
+
+def test_generated_question_defaults_to_empty_answer_for_old_payloads():
+    question = GeneratedQuestion(
+        question_type=QuestionType.SHORT,
+        text="What is humidity?",
+    )
+
+    assert question.answer == ""
+
+
+def test_exercise_type_supports_question_paper_and_skill_sheet():
+    assert ExerciseType.QUESTION_PAPER == "question_paper"
+    assert ExerciseType.SKILL_SHEET == "skill_sheet"
 
 
 def test_section_and_paper_marks_are_calculated():

@@ -2,7 +2,11 @@ from io import BytesIO
 
 from docx import Document
 
-from qpc.docx_exporter import render_docx
+from qpc.docx_exporter import (
+    render_answer_key_docx,
+    render_docx,
+    render_skill_sheet_docx,
+)
 from qpc.schemas import (
     GeneratedPaper,
     GeneratedQuestion,
@@ -57,6 +61,7 @@ def test_render_docx_uses_calculated_total_in_header():
                         question_type=QuestionType.MCQ,
                         text="Which physical feature is known as the storehouse of water?",
                         options=["Coastal Plains", "Himalayas", "Deccan Plateau", "Islands"],
+                        answer="Himalayas",
                     )
                 ],
             )
@@ -120,6 +125,9 @@ def test_render_docx_includes_case_study_instruction_passage_and_subquestions():
                             "Name the mountain range described.",
                             "State one benefit of these mountains.",
                         ],
+                        answer=(
+                            "Himalayas. They feed major rivers and influence rainfall."
+                        ),
                     )
                 ],
             )
@@ -136,3 +144,100 @@ def test_render_docx_includes_case_study_instruction_passage_and_subquestions():
     assert "1. Study the passage carefully." in text
     assert "(1) Name the mountain range described." in text
     assert "(2) State one benefit of these mountains." in text
+
+
+def test_render_answer_key_docx_contains_answers_without_questions_header_marks():
+    blueprint = PaperBlueprint(
+        metadata=PaperMetadata(
+            grade="VII",
+            subject="Social Science",
+            exam_name="First Periodic Assessment 2026-27",
+            date="17.07.2026",
+            duration="2 Hour",
+        ),
+        sections=[
+            SectionBlueprint(
+                label="Section A",
+                heading="Multiple Choice Based Questions",
+                question_type=QuestionType.MCQ,
+                questions_to_generate=1,
+                questions_to_answer=1,
+                marks_per_question=1,
+            )
+        ],
+    )
+    paper = GeneratedPaper(
+        sections=[
+            GeneratedSection(
+                label="Section A",
+                heading="Multiple Choice Based Questions",
+                question_type=QuestionType.MCQ,
+                questions=[
+                    GeneratedQuestion(
+                        question_type=QuestionType.MCQ,
+                        text="Which element tells us the amount of water vapour in the air?",
+                        options=["Rainfall", "Humidity", "Temperature", "Wind"],
+                        answer="Humidity",
+                    )
+                ],
+            )
+        ]
+    )
+
+    data = render_answer_key_docx(blueprint, paper)
+    document = Document(BytesIO(data))
+    text = _document_text(document)
+
+    assert "Answer Key" in text
+    assert "Section A" in text
+    assert "1. Humidity" in text
+    assert "M.M." not in text
+
+
+def test_render_skill_sheet_docx_puts_answers_after_questions_without_marks():
+    blueprint = PaperBlueprint(
+        metadata=PaperMetadata(
+            grade="VII",
+            subject="Social Science",
+            exam_name="Weather Skill Sheet",
+            date="17.07.2026",
+            duration="Practice",
+        ),
+        sections=[
+            SectionBlueprint(
+                label="Section A",
+                heading="Short Answer Questions",
+                question_type=QuestionType.SHORT,
+                questions_to_generate=1,
+                questions_to_answer=1,
+                marks_per_question=1,
+            )
+        ],
+    )
+    paper = GeneratedPaper(
+        sections=[
+            GeneratedSection(
+                label="Section A",
+                heading="Short Answer Questions",
+                question_type=QuestionType.SHORT,
+                questions=[
+                    GeneratedQuestion(
+                        question_type=QuestionType.SHORT,
+                        text="What is humidity?",
+                        answer="Humidity is the amount of water vapour in the air.",
+                    )
+                ],
+            )
+        ]
+    )
+
+    data = render_skill_sheet_docx(blueprint, paper)
+    document = Document(BytesIO(data))
+    text = _document_text(document)
+
+    assert "Weather Skill Sheet" in text
+    assert "1. What is humidity?" in text
+    assert "Answers" in text
+    assert text.index("1. What is humidity?") < text.index("1. Humidity is")
+    assert "M.M." not in text
+    assert "1x1=1" not in text

@@ -4,6 +4,7 @@ from qpc.question_generator import (
     parse_generated_paper_response,
 )
 from qpc.schemas import (
+    ExerciseType,
     GeneratedPaper,
     GeneratedQuestion,
     GeneratedSection,
@@ -94,16 +95,67 @@ def test_build_question_prompt_includes_selected_topics_and_blueprint():
         ],
     )
 
-    prompt = build_question_prompt([document], [topic], blueprint)
+    prompt = build_question_prompt(
+        [document],
+        [topic],
+        blueprint,
+        exercise_type=ExerciseType.QUESTION_PAPER,
+    )
 
     assert "Humidity" in prompt
     assert "Section A" in prompt
     assert "exactly four options" in prompt
-    assert "Do not generate an answer key" in prompt
+    assert "include an answer for every question" in prompt
     assert "case_study: return exactly one question object" in prompt
     assert "sub_questions as an array of plain strings, not objects" in prompt
     assert "map_diagram: return exactly generate question objects" in prompt
     assert "Paper total: 4 marks" in prompt
+    assert '"answer": "Correct answer or model answer"' in prompt
+
+
+def test_build_skill_sheet_prompt_omits_marks_language():
+    document = SourceDocument(
+        filename="weather.pdf",
+        pages=[SourcePage(page_number=1, text="Clouds form when vapour condenses.")],
+    )
+    topic = Topic(
+        id="clouds",
+        document_filename="weather.pdf",
+        name="Clouds",
+        summary="Cloud formation.",
+        source_pages=[1],
+    )
+    blueprint = PaperBlueprint(
+        metadata=PaperMetadata(
+            grade="VII",
+            subject="Social Science",
+            exam_name="Skill Sheet",
+            date="17.07.2026",
+            duration="Practice",
+        ),
+        sections=[
+            SectionBlueprint(
+                label="Section A",
+                heading="Short Answer Questions",
+                question_type=QuestionType.SHORT,
+                questions_to_generate=3,
+                questions_to_answer=3,
+                marks_per_question=1,
+            )
+        ],
+    )
+
+    prompt = build_question_prompt(
+        [document],
+        [topic],
+        blueprint,
+        exercise_type=ExerciseType.SKILL_SHEET,
+    )
+
+    assert "Skill sheet" in prompt
+    assert "Marks do not apply" in prompt
+    assert "Paper total:" not in prompt
+    assert "marks_each=" not in prompt
 
 
 def test_normalize_generated_paper_collapses_case_study_questions_to_subquestions():
@@ -214,6 +266,51 @@ def test_normalize_generated_paper_limits_case_study_subquestions_to_blueprint_c
         "Name one instrument used to measure weather.",
     ]
     assert validate_generated_paper(blueprint, normalized) == []
+
+
+def test_normalize_case_study_preserves_model_answer():
+    blueprint = PaperBlueprint(
+        metadata=PaperMetadata(
+            grade="VII",
+            subject="Social Science",
+            exam_name="First Periodic Assessment 2026-27",
+            date="17.07.2026",
+            duration="2 Hour",
+        ),
+        sections=[
+            SectionBlueprint(
+                label="Section E",
+                heading="Case Study Based Questions",
+                question_type=QuestionType.CASE_STUDY,
+                questions_to_generate=1,
+                questions_to_answer=1,
+                marks_per_question=1,
+            )
+        ],
+    )
+    paper = GeneratedPaper(
+        sections=[
+            GeneratedSection(
+                label="Section E",
+                heading="Case Study Based Questions",
+                question_type=QuestionType.CASE_STUDY,
+                passage="A short passage about weather.",
+                questions=[
+                    GeneratedQuestion(
+                        question_type=QuestionType.CASE_STUDY,
+                        text="Why does humidity affect comfort?",
+                        answer="High humidity slows evaporation from the skin.",
+                    ),
+                ],
+            )
+        ]
+    )
+
+    normalized = normalize_generated_paper(blueprint, paper)
+
+    assert normalized.sections[0].questions[0].answer == (
+        "High humidity slows evaporation from the skin."
+    )
 
 
 def test_normalize_generated_paper_fills_empty_map_diagram_section():

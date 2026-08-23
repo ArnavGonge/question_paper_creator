@@ -3,11 +3,13 @@ import json
 from openai import OpenAI
 
 from qpc.schemas import (
+    ExerciseType,
     GeneratedPaper,
     GeneratedQuestion,
     GeneratedSection,
     PaperBlueprint,
     QuestionType,
+    SectionBlueprint,
     SourceDocument,
     Topic,
 )
@@ -17,29 +19,38 @@ def build_question_prompt(
     documents: list[SourceDocument],
     selected_topics: list[Topic],
     blueprint: PaperBlueprint,
+    exercise_type: ExerciseType = ExerciseType.QUESTION_PAPER,
 ) -> str:
     topic_lines = "\n".join(
         f"- {topic.name} ({topic.document_filename}, pages {topic.source_pages}): {topic.summary}"
         for topic in selected_topics
     )
+    include_marks = exercise_type is ExerciseType.QUESTION_PAPER
     section_lines = "\n".join(
-        (
-            f"- {section.label}: {section.heading}; type={section.question_type.value}; "
-            f"generate={section.questions_to_generate}; answer={section.questions_to_answer}; "
-            f"marks_each={section.marks_per_question}; instruction={section.instruction or 'none'}"
-        )
+        _section_prompt_line(section, include_marks=include_marks)
         for section in blueprint.sections
     )
     source_blocks = "\n\n".join(
         f"DOCUMENT: {document.filename}\n{document.combined_text()[:16000]}"
         for document in documents
     )
+    exercise_label = (
+        "question paper"
+        if exercise_type is ExerciseType.QUESTION_PAPER
+        else "Skill sheet"
+    )
+    marks_line = (
+        f"Paper total: {blueprint.total_marks()} marks"
+        if include_marks
+        else "Marks do not apply to this Skill sheet."
+    )
+
     return f"""
-You generate an English school question paper from selected textbook topics.
+You generate an English school {exercise_label} from selected textbook topics.
 
 Rules:
 - Use only the selected topics and source material below.
-- Do not generate an answer key.
+- include an answer for every question in the answer field.
 - Do not include unsupported topics.
 - Each section must use exactly its configured question type.
 - MCQ questions must include exactly four options.
@@ -51,7 +62,7 @@ Rules:
 Selected topics:
 {topic_lines}
 
-Paper total: {blueprint.total_marks()} marks
+{marks_line}
 
 Section blueprint:
 {section_lines}
@@ -68,6 +79,7 @@ Return JSON with this shape:
         {{
           "question_type": "mcq",
           "text": "Question text",
+          "answer": "Correct answer or model answer",
           "options": ["A", "B", "C", "D"],
           "pairs": [],
           "sub_questions": []
@@ -80,6 +92,20 @@ Return JSON with this shape:
 Source material:
 {source_blocks}
 """.strip()
+
+
+def _section_prompt_line(
+    section: SectionBlueprint,
+    *,
+    include_marks: bool,
+) -> str:
+    base = (
+        f"- {section.label}: {section.heading}; type={section.question_type.value}; "
+        f"generate={section.questions_to_generate}; answer={section.questions_to_answer}; "
+    )
+    if include_marks:
+        base += f"marks_each={section.marks_per_question}; "
+    return f"{base}instruction={section.instruction or 'none'}"
 
 
 def parse_generated_paper_response(payload: dict) -> GeneratedPaper:
@@ -120,11 +146,14 @@ def _normalize_case_study_section(
     expected_sub_question_count: int,
 ) -> GeneratedSection:
     sub_questions: list[str] = []
+    answers: list[str] = []
     for question in section.questions:
         if question.sub_questions:
             sub_questions.extend(question.sub_questions)
         elif question.text.strip():
             sub_questions.append(question.text.strip())
+        if question.answer.strip():
+            answers.append(question.answer.strip())
 
     if not sub_questions:
         return section
@@ -136,6 +165,7 @@ def _normalize_case_study_section(
                 GeneratedQuestion(
                     question_type=QuestionType.CASE_STUDY,
                     text="Read the passage and answer the questions.",
+                    answer="\n".join(answers),
                     sub_questions=sub_questions,
                 )
             ]
@@ -171,11 +201,17 @@ def generate_questions_with_ai(
     blueprint: PaperBlueprint,
     api_key: str,
     model: str,
+    exercise_type: ExerciseType = ExerciseType.QUESTION_PAPER,
 ) -> GeneratedPaper:
     client = OpenAI(api_key=api_key)
     response = client.responses.create(
         model=model,
-        input=build_question_prompt(documents, selected_topics, blueprint),
+        input=build_question_prompt(
+            documents,
+            selected_topics,
+            blueprint,
+            exercise_type=exercise_type,
+        ),
         text={"format": {"type": "json_object"}},
     )
     payload = json.loads(response.output_text)

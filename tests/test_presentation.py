@@ -5,6 +5,7 @@ from qpc.presentation import STEP_COPY, error_report_text, section_header
 
 def test_every_wizard_step_has_concise_teacher_facing_copy():
     assert set(STEP_COPY) == {
+        "Exercise Type",
         "Upload PDFs",
         "Topics",
         "Paper Details",
@@ -15,10 +16,8 @@ def test_every_wizard_step_has_concise_teacher_facing_copy():
     assert all(item.title and item.prompt for item in STEP_COPY.values())
 
 
-def test_section_header_contains_type_count_and_marks():
-    assert section_header(default_sections()[0]) == (
-        "Section A | Multiple Choice | Answer 4 | 1 mark each | 4 marks"
-    )
+def test_section_header_only_contains_section_label():
+    assert section_header(default_sections()[0]) == "Section A"
 
 
 def test_error_report_text_contains_safe_copy_and_reference():
